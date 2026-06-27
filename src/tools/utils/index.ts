@@ -1,0 +1,1 @@
+export { GetCurrentTimeTool } from "./get-current-time"

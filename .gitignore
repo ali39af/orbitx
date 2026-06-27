@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build outputs
+dist/
+build/
+lib/
+*.js
+*.d.ts
+*.js.map
+*.d.ts.map
+*.tsbuildinfo
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environment and configuration files
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Testing coverage reports
+coverage/
+.nyc_output/
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Debug logs
+logs/
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# TypeScript incremental compilation
+.tscache/
+
+# Optional: If using pnpm
+.pnpm-debug.log

@@ -232,8 +232,8 @@ Output only this JSON line, nothing else:
 
             this.#currentInputHitTokens += this.#currentInputMissTokens;
             this.#currentInputMissTokens += chat.inputTokens - this.#currentInputMissTokens;
-            this.#currentOutputTokens += this.#currentOutputTokens;
-            this.#currentLastOutputTokens = this.#currentOutputTokens;
+            this.#currentOutputTokens += chat.outputTokens;
+            this.#currentLastOutputTokens = chat.outputTokens;
 
             toolsCalls = await this.#extractToolCalls(chat.content);
 
@@ -253,7 +253,7 @@ Output only this JSON line, nothing else:
 
                 this.#currentInputHitTokens += this.#currentInputMissTokens;
                 this.#currentInputMissTokens += memChat.inputTokens - this.#currentInputMissTokens;
-                this.#currentOutputTokens += this.#currentOutputTokens;
+                this.#currentOutputTokens += memChat.outputTokens;
 
                 for (const mc of await this.#extractToolCalls(memChat.content)) {
                     const toolResponse = await this.#dispatchTool(mc);

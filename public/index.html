@@ -1,0 +1,397 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="static/tailwindcss.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: 'Inter', system-ui, sans-serif;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #d1d5db;
+            border-radius: 3px;
+        }
+
+        .dark ::-webkit-scrollbar-thumb {
+            background: #374151;
+        }
+
+        .tool-val {
+            max-width: 260px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+                    colors: {
+                        surface: { 0: '#f5f5f4', 1: '#fafaf9', 2: '#ffffff' },
+                        accent: { bg: '#eff6ff', text: '#1d4ed8', border: '#bfdbfe' },
+                        pro: { bg: '#f3f0ff', text: '#6d28d9' },
+                        success: { bg: '#f0fdf4', text: '#15803d', border: '#bbf7d0' },
+                        warning: { bg: '#fffbeb', text: '#b45309', border: '#fde68a' },
+                        danger: { bg: '#fff1f2', text: '#be123c', border: '#fecdd3' },
+                    },
+                    animation: {
+                        'fade-up': 'fadeUp 0.18s ease-out',
+                        'blink': 'blink 1s step-start infinite',
+                    },
+                    keyframes: {
+                        fadeUp: { '0%': { opacity: 0, transform: 'translateY(6px)' }, '100%': { opacity: 1, transform: 'translateY(0)' } },
+                        blink: { '0%,100%': { opacity: 1 }, '50%': { opacity: 0 } },
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+
+<body class="bg-stone-100 dark:bg-zinc-900 min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header
+        class="sticky top-0 z-10 bg-white dark:bg-zinc-800 border-b border-stone-200 dark:border-zinc-700 px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+            <div class="w-7 h-7 rounded-full bg-violet-100 dark:bg-violet-900 flex items-center justify-center">
+                <svg class="w-4 h-4 text-violet-600 dark:text-violet-300" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                    <path d="M2 17l10 5 10-5" />
+                    <path d="M2 12l10 5 10-5" />
+                </svg>
+            </div>
+            <span class="font-semibold text-sm text-zinc-800 dark:text-zinc-100">Agent Thread</span>
+            <span id="status-dot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+        </div>
+        <button onclick="toggleDark()"
+            class="p-1.5 rounded-lg hover:bg-stone-100 dark:hover:bg-zinc-700 text-zinc-500 dark:text-zinc-400 transition-colors">
+            <svg id="icon-sun" class="w-4 h-4 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="5" />
+                <line x1="12" y1="1" x2="12" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="23" />
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                <line x1="1" y1="12" x2="3" y2="12" />
+                <line x1="21" y1="12" x2="23" y2="12" />
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+            </svg>
+            <svg id="icon-moon" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+            </svg>
+        </button>
+    </header>
+
+    <!-- Thread -->
+    <main id="thread" class="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3 max-w-3xl mx-auto w-full"></main>
+
+    <!-- Typing indicator placeholder -->
+    <div id="typing" class="hidden max-w-3xl mx-auto w-full px-4 pb-2">
+        <div class="flex items-center gap-2 text-xs text-zinc-400 dark:text-zinc-500">
+            <div class="flex gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-zinc-400 dark:bg-zinc-500 animate-bounce"
+                    style="animation-delay:0ms"></span>
+                <span class="w-1.5 h-1.5 rounded-full bg-zinc-400 dark:bg-zinc-500 animate-bounce"
+                    style="animation-delay:120ms"></span>
+                <span class="w-1.5 h-1.5 rounded-full bg-zinc-400 dark:bg-zinc-500 animate-bounce"
+                    style="animation-delay:240ms"></span>
+            </div>
+            Agent is working…
+        </div>
+    </div>
+
+    <!-- Input -->
+    <footer class="sticky bottom-0 bg-white dark:bg-zinc-800 border-t border-stone-200 dark:border-zinc-700 px-4 py-3">
+        <div class="max-w-3xl mx-auto flex gap-2">
+            <input id="user-input" type="text" placeholder="Send a message…"
+                class="flex-1 text-sm rounded-xl border border-stone-200 dark:border-zinc-600 bg-stone-50 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 px-4 py-2.5 outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition"
+                onkeydown="if(event.key==='Enter')sendUserMessage()" />
+            <button onclick="sendUserMessage()"
+                class="px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 active:scale-95 text-white text-sm font-medium transition-all flex items-center gap-1.5">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                </svg>
+                Send
+            </button>
+        </div>
+    </footer>
+
+
+    <script>
+        /* ── ICONS ─────────────────────────────────────────── */
+        const ICONS = {
+            search: `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`,
+            globe: `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
+            code: `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
+            file: `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
+            check: `<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+            cross: `<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+            clock: `<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+            agent: `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`,
+        };
+
+        const TOOL_META = {
+            'web-search': { icon: ICONS.search, label: 'Web search', color: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/40' },
+            'read-web-page': { icon: ICONS.globe, label: 'Fetch page', color: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/40' },
+            'run-code': { icon: ICONS.code, label: 'Run code', color: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/40' },
+            'read-file': { icon: ICONS.file, label: 'Read file', color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/40' },
+        };
+        function toolMeta(name) { return TOOL_META[name] || { icon: ICONS.code, label: name, color: 'text-zinc-500 bg-zinc-100 dark:bg-zinc-700' }; }
+
+        /* ── STATE ─────────────────────────────────────────── */
+        // Each entry: { role: 'user'|'assistant'|'tool', content }
+        // tool content is a JSON string
+        let messageQueue = [];
+        let isGenerating = false;
+        let currentGroupEl = null;  // the current agent-block div
+        let currentGroupItems = []; // items in current agent block
+
+        /* ── DEMO SCRIPT ───────────────────────────────────── */
+        // Pre-loaded conversation that plays automatically
+        const DEMO_SCRIPT = [
+            { role: 'user', content: 'Find me the best price for a flight from Birjand to Tehran.' },
+            { role: 'assistant', content: 'On it — starting with a broad price search.' },
+            { role: 'tool', content: JSON.stringify({ tool: 'web-search', inputs: { query: 'best price flights Birjand to Tehran' }, output: '10 results returned', status: 'ok' }) },
+            { role: 'assistant', content: "Got results. Let me open the top comparison site for live pricing." },
+            { role: 'tool', content: JSON.stringify({ tool: 'read-web-page', inputs: { url: 'https://zbordirect.com/en/low-cost/from-iran/to-iran/birjand-tehran', outputType: 'text' }, error: 'Navigation timeout of 50000 ms exceeded', status: 'err' }) },
+            { role: 'assistant', content: 'That site timed out. Trying Trip.com instead.' },
+            { role: 'tool', content: JSON.stringify({ tool: 'read-web-page', inputs: { url: 'https://us.trip.com/flights/birjand-to-tehran/airfares-xbj-thr/', outputType: 'text' }, error: 'Navigation timeout of 50000 ms exceeded', status: 'err' }) },
+            { role: 'assistant', content: 'Still failing. Let me search for more reliable comparison sites first.' },
+            { role: 'tool', content: JSON.stringify({ tool: 'web-search', inputs: { query: 'reliable flight comparison Iran Birjand Tehran' }, output: 'Skyscanner, Jetcost, Kayak, Wego found', status: 'ok' }) },
+            { role: 'assistant', content: 'Found better options. Reading Skyscanner now.' },
+            { role: 'tool', content: JSON.stringify({ tool: 'read-web-page', inputs: { url: 'https://www.skyscanner.com.my/routes/xbj/thra/birjand-to-tehran.html', outputType: 'text' }, output: 'Page loaded — 3 airlines, cheapest from ~$42', status: 'ok' }) },
+            { role: 'assistant', content: "Here's what I found: Iran Air and Mahan Air both operate direct flights (≈90 min). Cheapest one-way is **~$42** on Iran Air, rising to ~$65 on Mahan Air. Book at least 2 weeks out for the best fares." },
+            { role: 'user', content: 'What about train options between the two cities?' },
+            { role: 'assistant', content: "Let me look up train schedules from Birjand to Tehran." },
+            { role: 'tool', content: JSON.stringify({ tool: 'web-search', inputs: { query: 'train Birjand to Tehran schedule Raja Rail' }, output: '6 results found', status: 'ok' }) },
+            { role: 'assistant', content: 'Fetching the rail operator timetable.' },
+            { role: 'tool', content: JSON.stringify({ tool: 'read-web-page', inputs: { url: 'https://www.raja.ir/en/trains', outputType: 'text' }, output: 'Timetable loaded — 2 weekly departures', status: 'ok' }) },
+            { role: 'assistant', content: "Train option: Raja Rail runs **twice weekly** (Tues & Sat), departing 18:00, arriving ~08:30 next day — roughly 14.5 hours. Tickets start at **~450,000 IRR** (~$1.50 at free-market rate) in second class. Much cheaper than flying but significantly longer." },
+        ];
+
+        /* ── DOM HELPERS ──────────────────────────────────── */
+        const thread = document.getElementById('thread');
+        const typingEl = document.getElementById('typing');
+
+        function scrollToBottom() {
+            thread.scrollTop = thread.scrollHeight;
+        }
+
+        function showTyping(show) {
+            typingEl.classList.toggle('hidden', !show);
+            if (show) typingEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        }
+
+        function trunc(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : s; }
+
+        function md(text) {
+            return (text || '')
+                .replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold">$1</strong>')
+                .replace(/\n/g, '<br>');
+        }
+
+        /* ── RENDER: USER BUBBLE ─────────────────────────── */
+        function appendUserBubble(content) {
+            // Close any open agent group
+            currentGroupEl = null;
+            currentGroupItems = [];
+
+            const wrap = document.createElement('div');
+            wrap.className = 'flex justify-end animate-fade-up';
+            wrap.innerHTML = `
+    <div class="max-w-[72%] bg-violet-600 text-white text-sm rounded-2xl rounded-br-sm px-4 py-2.5 leading-relaxed shadow-sm">
+      ${md(content)}
+    </div>`;
+            thread.appendChild(wrap);
+            scrollToBottom();
+        }
+
+        /* ── RENDER: AGENT TEXT inside group ─────────────── */
+        function getOrCreateAgentGroup() {
+            if (!currentGroupEl) {
+                const wrap = document.createElement('div');
+                wrap.className = 'flex gap-2.5 animate-fade-up';
+
+                const avatarCol = document.createElement('div');
+                avatarCol.className = 'flex flex-col items-center pt-1 gap-1';
+                avatarCol.innerHTML = `
+      <div class="w-7 h-7 rounded-full bg-violet-100 dark:bg-violet-900/60 flex items-center justify-center text-violet-600 dark:text-violet-300 flex-shrink-0">
+        ${ICONS.agent}
+      </div>
+      <div class="agent-line w-px flex-1 bg-stone-200 dark:bg-zinc-700 min-h-0"></div>`;
+
+                const bodyCol = document.createElement('div');
+                bodyCol.className = 'flex-1 min-w-0 flex flex-col gap-1.5 pb-1';
+                bodyCol.dataset.agentBody = '1';
+
+                wrap.appendChild(avatarCol);
+                wrap.appendChild(bodyCol);
+                thread.appendChild(wrap);
+                currentGroupEl = bodyCol;
+            }
+            return currentGroupEl;
+        }
+
+        function appendAgentText(content) {
+            const body = getOrCreateAgentGroup();
+            const p = document.createElement('p');
+            p.className = 'text-sm text-zinc-700 dark:text-zinc-200 leading-relaxed';
+            p.innerHTML = md(content);
+            body.appendChild(p);
+            scrollToBottom();
+        }
+
+        /* ── RENDER: TOOL CARD inside group ──────────────── */
+        function appendToolCard(data) {
+            const body = getOrCreateAgentGroup();
+            const meta = toolMeta(data.tool);
+            const st = data.status;
+
+            let badgeHtml, resultHtml = '';
+            if (st === 'ok') {
+                badgeHtml = `<span class="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">${ICONS.check} Done</span>`;
+                if (data.output) resultHtml = `<p class="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1 leading-relaxed">${trunc(data.output, 100)}</p>`;
+            } else if (st === 'err') {
+                badgeHtml = `<span class="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-red-50 dark:bg-red-900/40 text-red-500 dark:text-red-400">${ICONS.cross} Failed</span>`;
+                if (data.error) resultHtml = `<p class="text-[11px] font-mono text-red-400 dark:text-red-500 mt-1 leading-relaxed">${data.error}</p>`;
+            } else {
+                badgeHtml = `<span class="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-700 text-zinc-400 dark:text-zinc-500">${ICONS.clock} Running</span>`;
+            }
+
+            const kvHtml = Object.entries(data.inputs || {}).map(([k, v]) => `
+    <span class="text-[10px] text-zinc-400 dark:text-zinc-500">${k}</span>
+    <span class="tool-val text-[10px] font-mono text-zinc-500 dark:text-zinc-400 bg-stone-100 dark:bg-zinc-800 border border-stone-200 dark:border-zinc-700 rounded px-1.5 py-0.5">${trunc(String(v), 55)}</span>`
+            ).join('');
+
+            const card = document.createElement('div');
+            card.className = 'rounded-xl border border-stone-200 dark:border-zinc-700 bg-white dark:bg-zinc-800/60 overflow-hidden';
+            card.innerHTML = `
+    <div class="flex items-center gap-2 px-3 py-2 border-b border-stone-100 dark:border-zinc-700/60">
+      <div class="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 ${meta.color}">${meta.icon}</div>
+      <span class="text-xs font-medium text-zinc-600 dark:text-zinc-300">${meta.label}</span>
+      <div class="ml-auto">${badgeHtml}</div>
+    </div>
+    <div class="px-3 py-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+      ${kvHtml}
+      ${resultHtml}
+    </div>`;
+            body.appendChild(card);
+            scrollToBottom();
+        }
+
+        /* ── MESSAGE PROCESSOR ────────────────────────────── */
+        async function processMessage(msg) {
+            await delay(60);
+            if (msg.role === 'user') {
+                currentGroupEl = null; // reset group
+                appendUserBubble(msg.content);
+            } else if (msg.role === 'assistant') {
+                await delay(300);
+                appendAgentText(msg.content);
+            } else if (msg.role === 'tool') {
+                let data;
+                try { data = JSON.parse(msg.content); } catch { data = {}; }
+                await delay(200);
+                appendToolCard(data);
+            }
+        }
+
+        function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+        async function drainQueue() {
+            if (isGenerating) return;
+            isGenerating = true;
+            showTyping(true);
+            while (messageQueue.length > 0) {
+                const msg = messageQueue.shift();
+                await processMessage(msg);
+                await delay(msg.role === 'tool' ? 350 : 180);
+            }
+            showTyping(false);
+            isGenerating = false;
+        }
+
+        function enqueue(msgs) {
+            messageQueue.push(...msgs);
+            drainQueue();
+        }
+
+        /* ── USER INPUT ───────────────────────────────────── */
+        function sendUserMessage() {
+            const input = document.getElementById('user-input');
+            const text = input.value.trim();
+            if (!text) return;
+            input.value = '';
+
+            // Immediately show user bubble
+            currentGroupEl = null;
+            appendUserBubble(text);
+
+            // Simulate agent reply
+            const reply = generateAgentReply(text);
+            messageQueue.push(...reply);
+            drainQueue();
+        }
+
+        function generateAgentReply(userText) {
+            // Simple mock — builds a short tool + response sequence
+            const q = userText.toLowerCase();
+            const searchQuery = q.slice(0, 50);
+            return [
+                { role: 'assistant', content: `Understood. Let me look that up for you.` },
+                { role: 'tool', content: JSON.stringify({ tool: 'web-search', inputs: { query: searchQuery }, output: 'Results found', status: 'ok' }) },
+                { role: 'assistant', content: `I searched for <strong>"${userText}"</strong>. In a real setup the agent would process results here and give you a detailed answer. Try connecting a real API to replace this stub.` },
+            ];
+        }
+
+        /* ── DARK MODE ────────────────────────────────────── */
+        function toggleDark() {
+            document.documentElement.classList.toggle('dark');
+            document.getElementById('icon-sun').classList.toggle('hidden');
+            document.getElementById('icon-moon').classList.toggle('hidden');
+        }
+
+        /* ── BOOT: play demo script ───────────────────────── */
+        window.addEventListener('DOMContentLoaded', () => {
+            // Stagger demo messages with realistic delays
+            const staggered = DEMO_SCRIPT.map((msg, i) => {
+                const base = msg.role === 'user' ? 600 : msg.role === 'tool' ? 450 : 300;
+                return { msg, delay: i * base };
+            });
+
+            staggered.forEach(({ msg, delay: d }) => {
+                setTimeout(() => {
+                    messageQueue.push(msg);
+                    if (!isGenerating) drainQueue();
+                }, d);
+            });
+        });
+    </script>
+</body>
+
+</html>

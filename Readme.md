@@ -1,5 +1,5 @@
-[![OrbitX Logo](./orbitx.png)](#)
-
+<!-- [![OrbitX Logo](./orbitx.png)](#) -->
+# OrbitX
 
 Better DOCS Coming soon Sorry
 
@@ -34,7 +34,7 @@ const ollamaProvider = new OllamaProvider("gemma3:latest");
 const agent = new ResearcherAgent({ aiProvider: ollamaProvider });
 
 let oldRole: "assistant" | "tool" | undefined;
-agent.run("what is IRR Value In USD", (chunk) => {
+agent.run("How artificial intelligence is changing the job market", (chunk) => {
     if (oldRole != chunk.role) {
         process.stdout.write(`\n${chunk.role}: `);
         oldRole = chunk.role;

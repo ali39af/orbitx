@@ -1,5 +1,4 @@
-<!-- [![OrbitX Logo](./orbitx.png)](#) -->
-# OrbitX
+[![OrbitX Logo](https://raw.githubusercontent.com/ali39af/orbitx/refs/heads/main/orbitx.png)](#)
 
 Better DOCS Coming soon Sorry
 

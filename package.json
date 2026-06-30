@@ -2,6 +2,14 @@
   "name": "orbitx",
   "version": "0.0.5",
   "description": "An AI SDK providing agents, swarms, planners, skills, MCP tools, workflows, and multi-provider AI integrations.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ali39af/orbitx.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ali39af/orbitx/issues"
+  },
+  "homepage": "https://github.com/ali39af/orbitx#readme",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

@@ -1,10 +1,25 @@
 {
   "name": "orbitx",
-  "version": "0.0.2",
+  "version": "0.0.5",
   "description": "An AI SDK providing agents, swarms, planners, skills, MCP tools, workflows, and multi-provider AI integrations.",
-  "main": "index.js",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "test": "echo \"No tests\""
   },
   "keywords": [
     "AI",
@@ -14,7 +29,6 @@
     "Skills",
     "Tools"
   ],
-  "type": "module",
   "author": "ali39",
   "license": "MIT",
   "dependencies": {

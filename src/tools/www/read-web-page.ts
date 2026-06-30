@@ -1,6 +1,6 @@
 import puppeteer, { Browser } from "puppeteer-core";
 import os from "os";
-import MCPTool from "../../core/mcp";
+import MCPTool from "../../core/mcp.js";
 
 export const ReadWebPageTool = new MCPTool({
     name: "read-web-page",
@@ -44,7 +44,7 @@ export const ReadWebPageTool = new MCPTool({
                 executablePath: process.env.CHROME_PATH || (os.platform() == "win32" ?
                     "C:/Program Files/Google/Chrome/Application/chrome.exe" :
                     "/usr/bin/google-chrome-stable"),
-                headless: true,
+                headless: false,
                 args: ["--no-sandbox"],
             });
 

@@ -1,11 +1,11 @@
-import type { Message } from "../core/ai-provider";
-import type AIProvider from "../core/ai-provider";
-import BaseAgent from "../core/base-agent";
-import type MCPTool from "../core/mcp";
-import MCPClient from "../core/mcp-client";
-import MCPConnection from "../core/mcp-connection";
-import MCPServer from "../core/mcp-server";
-import type Skill from "../core/skill";
+import type { Message } from "../core/ai-provider.js";
+import type AIProvider from "../core/ai-provider.js";
+import BaseAgent from "../core/base-agent.js";
+import type MCPTool from "../core/mcp.js";
+import MCPClient from "../core/mcp-client.js";
+import MCPConnection from "../core/mcp-connection.js";
+import MCPServer from "../core/mcp-server.js";
+import type Skill from "../core/skill.js";
 
 export class SimpleAgent extends BaseAgent {
     constructor({

@@ -1,2 +1,2 @@
-export { ReadFileTool } from "./read-file";
-export { WriteFileTool } from "./write-file";
+export { ReadFileTool } from "./read-file.js";
+export { WriteFileTool } from "./write-file.js";

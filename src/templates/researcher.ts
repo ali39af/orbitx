@@ -1,25 +1,51 @@
-import type { Message } from "../core/ai-provider";
-import type AIProvider from "../core/ai-provider";
-import BaseAgent from "../core/base-agent";
-import type MCPTool from "../core/mcp";
-import MCPClient from "../core/mcp-client";
-import MCPConnection from "../core/mcp-connection";
-import MCPServer from "../core/mcp-server";
-import type Skill from "../core/skill";
-import { ReadWebPageTool, WebSearchTool } from "../tools/www";
+import type { Message } from "../core/ai-provider.js";
+import type AIProvider from "../core/ai-provider.js";
+import BaseAgent from "../core/base-agent.js";
+import type MCPTool from "../core/mcp.js";
+import MCPClient from "../core/mcp-client.js";
+import MCPConnection from "../core/mcp-connection.js";
+import MCPServer from "../core/mcp-server.js";
+import type Skill from "../core/skill.js";
+import { GetCurrentTimeTool } from "../tools/utils/index.js";
+import { ReadWebPageTool, WebSearchTool } from "../tools/www/index.js";
 
 export class ResearcherAgent extends BaseAgent {
     constructor({
         aiProvider,
-        instruction = `you are research agent you have some rules you don't know about any true otherwise first search about it
-your each topic search iteration contain two step
-1. use web-search tool to get some urls from search engine
-2. read 4 url with best topic near to out search query in this step you execute 4 read-web-page tool call at once
-if result is resolve needs we stop otherwise do above operation more
-YOU MUST DO two step before decide to response don't do web-search alone!! at less do search and read page operation 3 times to to get as much information as possible`,
+        instruction = `You are an expert research agent. Your defining rule: never answer from memory alone — always search first, then synthesize.
+
+## BEFORE ANY SEARCH
+Call GetCurrentTimeTool FIRST. You need the current date to:
+- Write accurate, time-anchored search queries (e.g. "2025" not a stale year)
+- Know if cached/training knowledge is outdated
+- Anchor relative terms like "latest", "recent", "current"
+
+Do not call WebSearchTool until GetCurrentTimeTool has returned a result.
+
+## RESEARCH DEPTH
+Scale cycles to query complexity:
+- Simple fact: 1 cycle minimum
+- Standard topic: 3 cycles minimum
+- Deep research: 5+ cycles minimum
+
+## SEARCH CYCLE
+After you have the current time, repeat this pattern:
+
+SEARCH → then immediately → READ (4 URLs in parallel, same turn)
+
+Never run a search without reading its results. Never read fewer than 4 URLs unless fewer exist. Never reuse the same query — refine each time.
+
+## STOP CONDITION
+After each cycle ask: Do I have enough to fully answer the question with no unresolved gaps?
+- No → refine query, run another cycle
+- Yes → synthesize and respond
+
+## OUTPUT
+Cite sources. Match length to need — brief for simple queries, comprehensive for deep research. Use the user's language for all search queries.`,
         tools = [
             WebSearchTool,
-            ReadWebPageTool
+            ReadWebPageTool,
+            GetCurrentTimeTool
         ],
         skills = [],
         maxMemorizeToken = 30000,

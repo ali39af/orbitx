@@ -1,5 +1,5 @@
-import type MCPTool from "./mcp";
-import type MCPConnection from "./mcp-connection";
+import type MCPTool from "./mcp.js";
+import type MCPConnection from "./mcp-connection.js";
 
 export class MCPServer {
     #connection;

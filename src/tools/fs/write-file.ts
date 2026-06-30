@@ -1,4 +1,4 @@
-import MCPTool from "../../core/mcp";
+import MCPTool from "../../core/mcp.js";
 import fs from "fs/promises";
 import path from "path";
 

@@ -1,7 +1,7 @@
-import type { AIProvider, Message, StreamCallback } from "./ai-provider";
-import type MCPClient from "./mcp-client";
-import type MCPTool from "./mcp";
-import type Skill from "./skill";
+import type { AIProvider, Message, StreamCallback } from "./ai-provider.js";
+import type MCPClient from "./mcp-client.js";
+import type MCPTool from "./mcp.js";
+import type Skill from "./skill.js";
 
 export interface ParsedToolCall {
     id: string;
@@ -138,12 +138,12 @@ export class BaseAgent {
             .filter(t => this.#allowedTools.includes(t.name));
 
         const toolBlock = tools.map(t => {
-            const params = t.inputs.map(ti =>
+            const params = t.inputs.map((ti: any) =>
                 `${ti.name}${ti.required ? "" : "?"}:${ti.type}${ti.default !== undefined ? `=${JSON.stringify(ti.default)}` : ""} // ${ti.description}`
             ).join(", ");
 
             const example: Record<string, unknown> = {};
-            t.inputs.forEach(ti => {
+            t.inputs.forEach((ti: any) => {
                 example[ti.name] = ti.default !== undefined ? ti.default
                     : ti.type === "string" ? "..."
                         : ti.type === "number" ? 0
@@ -170,7 +170,7 @@ TOOLS:
 ${toolBlock}
 `}
 
-${this.#skills &&`
+${this.#skills && `
 SKILLS:
 ${this.#skills.map(skill => (`${skill.getSkill().name} - ${skill.getSkill().description}
 ${skill.getSkill().instructions}

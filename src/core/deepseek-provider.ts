@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import AIProvider, { type Message, type ChatResponse, type StreamCallback } from "./ai-provider";
+import AIProvider, { type Message, type ChatResponse, type StreamCallback } from "./ai-provider.js";
 
 export class DeepSeekProvider extends AIProvider {
     private client: OpenAI;

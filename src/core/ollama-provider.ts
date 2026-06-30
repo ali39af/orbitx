@@ -1,5 +1,5 @@
 import { Ollama } from "ollama";
-import AIProvider, { type Message, type ChatResponse, type StreamCallback } from "./ai-provider";
+import AIProvider, { type Message, type ChatResponse, type StreamCallback } from "./ai-provider.js";
 
 export class OllamaProvider extends AIProvider {
     private client: Ollama;

@@ -1,17 +1,19 @@
-export { AIProvider } from "./core/ai-provider";
-export { BaseAgent } from "./core/base-agent";
-export { DeepSeekProvider } from "./core/deepseek-provider";
-export { MCPClient } from "./core/mcp-client";
-export { MCPConnection } from "./core/mcp-connection";
-export { MCPIPCConnection } from "./core/mcp-ipc-connection";
-export { MCPServer } from "./core/mcp-server";
-export { MCPTool } from "./core/mcp";
-export { OllamaProvider } from "./core/ollama-provider";
-export { Skill } from "./core/skill";
+export { AIProvider } from "./core/ai-provider.js";
+export type { ChatResponse, Message, StreamCallback } from "./core/ai-provider.js";
+export { BaseAgent } from "./core/base-agent.js";
+export type { ExtractedSegment, ParsedToolCall } from "./core/base-agent.js";
+export { DeepSeekProvider } from "./core/deepseek-provider.js";
+export { MCPClient } from "./core/mcp-client.js";
+export { MCPConnection } from "./core/mcp-connection.js";
+export { MCPIPCConnection } from "./core/mcp-ipc-connection.js";
+export { MCPServer } from "./core/mcp-server.js";
+export { MCPTool } from "./core/mcp.js";
+export { OllamaProvider } from "./core/ollama-provider.js";
+export { Skill } from "./core/skill.js";
 
-export { ResearcherAgent } from "./templates/researcher";
-export { SimpleAgent } from "./templates/simple";
+export { ResearcherAgent } from "./templates/researcher.js";
+export { SimpleAgent } from "./templates/simple.js";
 
-export { ReadFileTool, WriteFileTool } from "./tools/fs";
-export { GetCurrentTimeTool } from "./tools/utils";
-export { FetchTool, ReadWebPageTool, WebSearchTool } from "./tools/www";
+export { ReadFileTool, WriteFileTool } from "./tools/fs/index.js";
+export { GetCurrentTimeTool } from "./tools/utils/index.js";
+export { FetchTool, ReadWebPageTool, WebSearchTool } from "./tools/www/index.js";

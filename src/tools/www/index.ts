@@ -1,3 +1,3 @@
-export { FetchTool } from "./fetch";
-export { WebSearchTool } from "./web-search";
-export { ReadWebPageTool } from "./read-web-page"
+export { FetchTool } from "./fetch.js";
+export { WebSearchTool } from "./web-search.js";
+export { ReadWebPageTool } from "./read-web-page.js";

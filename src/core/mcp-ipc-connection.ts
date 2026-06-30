@@ -1,6 +1,6 @@
 import * as net from "net";
 import * as fs from "fs";
-import MCPConnection from "./mcp-connection";
+import MCPConnection from "./mcp-connection.js";
 
 type Role = "server" | "client" | "pending";
 

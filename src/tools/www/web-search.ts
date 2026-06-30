@@ -1,6 +1,6 @@
 import os from "os";
 import puppeteer from "puppeteer-core";
-import MCPTool from "../../core/mcp";
+import MCPTool from "../../core/mcp.js";
 
 export const WebSearchTool = new MCPTool({
     name: "web-search",
@@ -33,7 +33,7 @@ export const WebSearchTool = new MCPTool({
                 executablePath: process.env.CHROME_PATH || (os.platform() == "win32" ?
                     "C:/Program Files/Google/Chrome/Application/chrome.exe" :
                     "/usr/bin/google-chrome-stable"),
-                headless: true,
+                headless: false,
                 args: ["--no-sandbox"],
             });
 

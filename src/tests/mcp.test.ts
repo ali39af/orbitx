@@ -1,11 +1,11 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import os from "os";
-import MCPIPCConnection from "../core/mcp-ipc-connection";
-import MCPServer from "../core/mcp-server";
-import MCPClient from "../core/mcp-client";
-import { GetCurrentTimeTool } from "../tools/utils";
-import { FetchTool, WebSearchTool } from "../tools/www";
+import MCPIPCConnection from "../core/mcp-ipc-connection.js";
+import MCPServer from "../core/mcp-server.js";
+import MCPClient from "../core/mcp-client.js";
+import { GetCurrentTimeTool } from "../tools/utils/index.js";
+import { FetchTool, WebSearchTool } from "../tools/www/index.js";
 
 describe("MCP Client and Server", async () => {
     const path1 = os.platform() == "win32" ? `\\\\.\\pipe\\test${Math.random() * 1000}` : `/tmp/mcp_test${Math.random() * 1000}.sock`;

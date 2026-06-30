@@ -1,4 +1,4 @@
-import MCPTool from "../../core/mcp";
+import MCPTool from "../../core/mcp.js";
 
 export const FetchTool = new MCPTool({
     name: "fetch",

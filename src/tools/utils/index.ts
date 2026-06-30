@@ -1,1 +1,1 @@
-export { GetCurrentTimeTool } from "./get-current-time"
+export { GetCurrentTimeTool } from "./get-current-time.js"

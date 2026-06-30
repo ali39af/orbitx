@@ -1,6 +1,6 @@
 {
   "name": "orbitx",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "An AI SDK providing agents, swarms, planners, skills, MCP tools, workflows, and multi-provider AI integrations.",
   "repository": {
     "type": "git",

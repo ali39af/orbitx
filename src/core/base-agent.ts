@@ -275,6 +275,28 @@ Output only this JSON line, nothing else:
         } while (toolsCalls.length > 0);
     }
 
+    getCurrentAgentStates() {
+        return {
+            memory: this.#memory,
+            messagesFull: this.#messagesFull,
+            fullInputMissTokens: this.#fullInputMissTokens,
+            fullInputHitTokens: this.#fullInputHitTokens,
+            fullOutputTokens: this.#fullOutputTokens,
+            messagesCompact: this.#messagesCompact,
+            currentInputMissTokens: this.#currentInputMissTokens,
+            currentInputHitTokens: this.#currentInputHitTokens,
+            currentOutputTokens: this.#currentOutputTokens,
+        };
+    }
+    getTotalTokens() {
+        return {
+            total: this.#currentInputHitTokens + this.#currentInputMissTokens + this.#currentOutputTokens + this.#fullInputHitTokens + this.#fullInputMissTokens + this.#fullOutputTokens,
+            inputHit: this.#currentInputHitTokens + this.#fullInputHitTokens,
+            inputMiss: this.#currentInputMissTokens + this.#fullInputMissTokens,
+            output: this.#currentOutputTokens + this.#fullOutputTokens
+        };
+    }
+
     getCurrentTotalTokens() {
         return {
             total: this.#currentInputHitTokens + this.#currentInputMissTokens + this.#currentOutputTokens,

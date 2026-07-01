@@ -1,6 +1,6 @@
 {
   "name": "orbitx",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "An AI SDK providing agents, swarms, planners, skills, MCP tools, workflows, and multi-provider AI integrations.",
   "repository": {
     "type": "git",
@@ -40,13 +40,13 @@
   "author": "ali39",
   "license": "MIT",
   "dependencies": {
-    "express": "^5.2.1",
     "ollama": "^0.6.3",
     "openai": "^6.45.0",
-    "puppeteer-core": "^24.43.1",
-    "socket.io": "^4.8.3"
+    "puppeteer-core": "^24.43.1"
   },
   "devDependencies": {
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3",
     "@types/express": "^5.0.6",
     "@types/node": "^26.0.0",
     "nodemon": "^3.1.14",

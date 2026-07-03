@@ -44,7 +44,7 @@ export const ReadWebPageTool = new MCPTool({
                 executablePath: process.env.CHROME_PATH || (os.platform() == "win32" ?
                     "C:/Program Files/Google/Chrome/Application/chrome.exe" :
                     "/usr/bin/google-chrome-stable"),
-                headless: false,
+                headless: true,
                 args: ["--no-sandbox"],
             });
 

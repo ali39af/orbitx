@@ -64,7 +64,8 @@ export class MCPComputer {
         const workspaceHost = path.join(this.#mountPath, "workspace");
         const storageHost = path.join(this.#mountPath, "mcp-server-storage");
         const presentsHost = path.join(this.#mountPath, "presents");
-        const dirs = [workspaceHost, storageHost, presentsHost, this.#ipcPath];
+        const userInputsHost = path.join(this.#mountPath, "user-inputs");
+        const dirs = [workspaceHost, storageHost, presentsHost, userInputsHost, this.#ipcPath];
 
         for (const dir of dirs) {
             fs.mkdirSync(dir, { recursive: true });

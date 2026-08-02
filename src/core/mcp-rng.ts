@@ -2,7 +2,7 @@ import type MCPStorage from "./mcp-storage.js";
 
 
 /* MCP RNG Generate unique cross reference hex numbers shared with tools and guaranty tools never use duplicate id */
-export default class MCPRNG {
+export class MCPRNG {
     #storage: MCPStorage;
 
     constructor(storage: MCPStorage) {
@@ -16,3 +16,5 @@ export default class MCPRNG {
         return `0x${rng.toString(16)}`;
     }
 }
+
+export default MCPRNG;

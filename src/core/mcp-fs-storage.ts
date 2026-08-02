@@ -3,7 +3,7 @@ import { join } from "path";
 import { createHash } from "crypto";
 import MCPStorage from "./mcp-storage.js";
 
-export default class MCPFSStorage extends MCPStorage {
+export class MCPFSStorage extends MCPStorage {
 
     #fsStoragePath: string;
     constructor(fsStoragePath = `./data/mcp-storage-${Math.round(Math.random() * 100000)}`) {
@@ -28,3 +28,5 @@ export default class MCPFSStorage extends MCPStorage {
         writeFileSync(join(this.#fsStoragePath, createHash("sha256").update(key).digest("hex")), value, { encoding: "utf-8" });
     }
 }
+
+export default MCPFSStorage

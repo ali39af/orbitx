@@ -17,6 +17,11 @@ export { toOpenAIFunctionTools } from "./core/tool-schema-translator.js";
 export { resolveAgentProviders } from "./core/agent-providers.js";
 export type { AgentProviderRole, AgentProviderEntry, AgentProvidersInput, ResolvedAgentProviders } from "./core/agent-providers.js";
 
+export { MCPRNG } from "./core/mcp-rng.js";
+export { MCPStorage } from "./core/mcp-storage.js";
+export { MCPFSStorage } from "./core/mcp-fs-storage.js";
+
+
 export { SimpleAgent } from "./templates/simple.js";
 
 export { GetCurrentTimeTool, DelayTool, UtilTools } from "./tools/utils/index.js";

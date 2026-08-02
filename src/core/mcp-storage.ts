@@ -1,4 +1,4 @@
-export default abstract class MCPStorage {
+export abstract class MCPStorage {
     abstract get(
         key: string
     ): Promise<string>;
@@ -8,3 +8,6 @@ export default abstract class MCPStorage {
         value: string
     ): Promise<void>;
 }
+
+
+export default MCPStorage;

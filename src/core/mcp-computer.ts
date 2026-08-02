@@ -1,4 +1,3 @@
-// TODO Add Host ability to docker to open any ports
 import os from "os";
 import { randomUUID } from "crypto";
 import { spawn, execFileSync } from "child_process";
@@ -7,16 +6,27 @@ import path from "path";
 
 export class MCPComputer {
     #mountPath: string;
-    #ports: number[];
+    #ports: number[] | "*";
+    #hostNetwork: boolean;
     #image: string;
     #ipcPath: string;
     #containerName: string;
+    #child: ReturnType<typeof spawn> | null = null;
+    #exitHandler: (() => void) | null = null;
 
-    constructor(mountPath: string, ports: number[], image: string = "orbitx-sandbox:0.1") {
+    constructor(mountPath: string, ports: number[] | "*", image: string = "orbitx-sandbox:0.1") {
         if (os.platform() === "win32") {
             throw new Error(
                 "This feature is not currently supported natively on Windows. " +
                 "Please run via WSL, or use a Unix-like filesystem (this feature needs one)."
+            );
+        }
+
+        this.#hostNetwork = ports === "*";
+        if (this.#hostNetwork && os.platform() !== "linux") {
+            throw new Error(
+                "Host network mode (ports: \"*\") requires Docker's --network host, " +
+                "which is only supported on Linux. Pass an explicit array of ports instead."
             );
         }
 
@@ -31,9 +41,23 @@ export class MCPComputer {
         return `${this.#ipcPath}/socket.sock`;
     }
 
-    /** Host-side path where presented files land (mounted into the container at /home/ubuntu/presents). */
     getPresentsHostPath(): string {
         return path.join(this.#mountPath, "presents");
+    }
+
+    isHostNetwork(): boolean {
+        return this.#hostNetwork;
+    }
+
+    getPortUrl(port: number, host: string = "localhost"): string {
+        if (!this.#hostNetwork && !(this.#ports as number[]).includes(port)) {
+            throw new Error(
+                `Port ${port} was not exposed for this sandbox. ` +
+                `Available ports: ${(this.#ports as number[]).join(", ") || "none"}. ` +
+                `Pass ports: "*" at construction time to allow any port.`
+            );
+        }
+        return `http://${host}:${port}`;
     }
 
     #prepareHostPaths(containerUid = 1000, containerGid = 1000) {
@@ -79,8 +103,12 @@ export class MCPComputer {
             "-e", "PRESENT_PATH=/home/ubuntu/presents",
         ];
 
-        for (const port of this.#ports) {
-            args.push("-p", `${port}:${port}`);
+        if (this.#hostNetwork) {
+            args.push("--network", "host");
+        } else {
+            for (const port of this.#ports as number[]) {
+                args.push("-p", `${port}:${port}`);
+            }
         }
 
         args.push(this.#image);
@@ -91,26 +119,40 @@ export class MCPComputer {
         this.#prepareHostPaths();
 
         const args = this.buildDockerArgs();
-        const child = spawn("docker", args, { stdio: "inherit" });
+        const child = spawn("docker", args, { stdio: "ignore" });
+        this.#child = child;
 
-        process.on("exit", () => {
+        this.#exitHandler = () => {
             try {
                 execFileSync("docker", ["kill", this.#containerName], { stdio: "ignore" });
             } catch {
                 // already stopped, fine
             }
-        });
+        };
+        process.on("exit", this.#exitHandler);
 
         return child;
+    }
+
+    stop() {
+        if (this.#exitHandler) {
+            this.#exitHandler();
+            process.off("exit", this.#exitHandler);
+            this.#exitHandler = null;
+        }
+
+        this.#child = null;
     }
 
     getInstructions(): string {
         const workspacePath = "/home/ubuntu/workspace";
         const presentsPath = "/home/ubuntu/presents";
         const userInputsPath = "/home/ubuntu/user-inputs";
-        const portsList = this.#ports.length > 0
-            ? this.#ports.join(", ")
-            : "none";
+        const portsList = this.#hostNetwork
+            ? "any (host network mode — all ports are shared with the host)"
+            : (this.#ports as number[]).length > 0
+                ? (this.#ports as number[]).join(", ")
+                : "none";
 
         return [
             `SandBox info`,

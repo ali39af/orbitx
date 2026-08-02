@@ -1,14 +1,33 @@
 import type MCPTool from "./mcp.js";
 import type MCPConnection from "./mcp-connection.js";
 import { randomUUID } from "crypto";
+import { MCP, normalizeToolOutput } from "./mcp.js";
+import MCPRNG from "./mcp-rng.js";
+import type MCPStorage from "./mcp-storage.js";
+import MCPFSStorage from "./mcp-fs-storage.js";
 
-export class MCPClient {
+export class MCPClient extends MCP {
     #connections;
-    #tools: MCPTool[] = [];
+    #storage;
+    #rng;
+    #tools: MCPTool<any>[] = [];
     #envID;
-    constructor(envID: string, connection: MCPConnection | MCPConnection[]) {
+    constructor(envID: string, connection: MCPConnection | MCPConnection[], storage: MCPStorage = new MCPFSStorage(), rng?: MCPRNG) {
+        super();
+        this.#storage = storage;
+        if (!rng)
+            rng = new MCPRNG(storage);
+        this.#rng = rng;
         this.#connections = Array.isArray(connection) ? connection : [connection];
         this.#envID = envID;
+    }
+
+    getStorage(): MCPStorage {
+        return this.#storage;
+    }
+
+    getRNG(): MCPRNG {
+        return this.#rng;
     }
 
     async getTools() {
@@ -60,20 +79,27 @@ export class MCPClient {
         })), ...connectionsTools];
     }
 
+    /**
+     * Calls a tool and returns its result normalized into the standard
+     * MCPToolOutput contract ({type:"text"|"image", output:{...}}) —
+     * regardless of whether the tool lives in-process or across the
+     * IPC connection to a sandboxed MCPServer, and regardless of whether
+     * the tool itself already returns that shape or just a plain object
+     * (the legacy convention most existing tools use).
+     */
     async callTool(toolName: string, inputs: Record<string, any>) {
         const clientTool = this.#tools.find(t => t.getOptions().name == toolName);
         if (clientTool) {
-            return JSON.stringify(await clientTool.getOptions().execute(this.#envID, inputs));
+            const raw = await clientTool.getOptions().execute(this.#envID, inputs, clientTool.getMCP(), clientTool.getOptions().customClass);
+            return normalizeToolOutput(raw);
         } else {
-            return JSON.stringify(await new Promise<any>((resolve) => {
+            const raw = await new Promise<any>((resolve) => {
                 let resolvedResult = false;
                 this.#connections.map(conn => {
                     const pid = randomUUID();
-                    let resolved = false;
 
                     const onRead = (data: any) => {
                         if (data.topic === "toolCallCallback" && data.pid === pid) {
-                            resolved = true;
                             conn.off("read", onRead);
                             if (!resolvedResult) {
                                 resolve(data.output || {});
@@ -90,22 +116,14 @@ export class MCPClient {
                         envID: this.#envID,
                         inputs
                     });
-
-                    setTimeout(() => {
-                        if (!resolved) {
-                            conn.off("read", onRead);
-                        }
-                        if (!resolvedResult) {
-                            resolve({ error: "The tool call exceeded the 300second timeout limit." });
-                            resolvedResult = true;
-                        }
-                    }, 300000);
                 });
-            }));
+            });
+            return normalizeToolOutput(raw);
         }
     }
 
-    registerTool(tool: MCPTool) {
+    registerTool(tool: MCPTool<any>) {
+        tool.setMCP(this);
         this.#tools.push(tool);
     }
 }

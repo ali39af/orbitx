@@ -53,8 +53,16 @@ tmp/
 temp/
 *.tmp
 
+# Runtime-generated data (MCPFSStorage default, presentable dir)
+data/
+presentable/
+
+
 # TypeScript incremental compilation
 .tscache/
 
 # Optional: If using pnpm
 .pnpm-debug.log
+
+output/
+src/test.ts

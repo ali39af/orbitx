@@ -27,7 +27,7 @@ export class SimpleAgent extends BaseAgent {
         }
     }: {
         instruction: string;
-        tools: MCPTool[];
+        tools?: MCPTool<any>[];
         aiProvider: AIProvider;
         skills?: Skill[];
         maxMemorizeToken?: number;
@@ -48,6 +48,11 @@ export class SimpleAgent extends BaseAgent {
         tools.forEach(tool => {
             mcpServer.registerTool(tool);
         });
+        [...new Set(skills.flatMap(s => s.getSkill().tools))].filter(t => !tools.includes(t)).forEach(tool => {
+            mcpServer.registerTool(tool);
+            tools.push(tool);
+        });
+
         const mcpClient = new MCPClient("DEFAULT_ENV", conn);
         super({
             aiProvider,

@@ -1,54 +1,66 @@
-import MCPTool from "../../core/mcp.js";
-import fs from "fs/promises";
-import path from "path";
+import { readFile } from "fs/promises";
+import { MCPTool, type MCP } from "../../core/mcp.js";
+import { FsInteraction } from "./interaction.js";
+import { resolvePath, toLines, paginateLines } from "./utils.js";
 
-export const ReadFileTool = new MCPTool({
-    name: "read-file",
-    description: "Reads text content from a file at the specified path.",
-    inputs: [{
-        name: "filePath",
-        type: "string",
-        description: `Absolute or relative path to the file (e.g., "/home/user/doc.txt" or "./file.txt")`,
-        required: true,
-    }],
-    execute: async (_: string, inputs: Record<string, any>): Promise<any> => {
+export const FsReadFileTool = () => new MCPTool<FsInteraction>({
+    name: "fs-read-file",
+    description:
+        "read a text file from disk, optionally paging through it by line so large files never need to be read in one shot",
+    inputs: [
+        {
+            name: "path",
+            type: "string",
+            description: "absolute or cwd-relative path to the file",
+            required: true,
+        },
+        {
+            name: "offsetLine",
+            type: "number",
+            description: "line offset to start reading from",
+            required: false,
+            default: 0,
+        },
+        {
+            name: "limitLine",
+            type: "number",
+            description: "max number of lines to return",
+            required: false,
+            default: 2000,
+        },
+    ],
+    customClass: new FsInteraction(),
+    execute: async (
+        _envID: string,
+        inputs: Record<string, any>,
+        _mcp?: MCP,
+        customClass?: FsInteraction
+    ): Promise<any> => {
+        const { path, offsetLine = 0, limitLine = 2000 } = inputs;
+
+        const fullPath = resolvePath(path);
+
+        customClass?.emitFsEvent({ type: "reading", path: fullPath });
+
+        let raw: string;
         try {
-            const { filePath } = inputs;
-
-            if (!filePath || typeof filePath !== "string") {
-                throw new Error("filePath must be a non-empty string");
-            }
-
-            const normalizedPath = path.normalize(filePath);
-
-            const data = await fs.readFile(normalizedPath, "utf-8");
-
-            return {
-                message: `File read successfully: ${normalizedPath}`,
-                path: normalizedPath,
-                content: data,
-                size: data.length
-            };
-
-        } catch (error) {
-            let errorMessage = error instanceof Error ? error.message : String(error);
-
-            if (error instanceof Error && "code" in error) {
-                const err = error as NodeJS.ErrnoException;
-                if (err.code === "ENOENT") {
-                    errorMessage = `File not found: ${inputs.filePath}`;
-                } else if (err.code === "EACCES") {
-                    errorMessage = `Permission denied: ${inputs.filePath}`;
-                } else if (err.code === "EISDIR") {
-                    errorMessage = `Path is a directory, not a file: ${inputs.filePath}`;
-                }
-            }
-
-            return {
-                error: errorMessage
-            };
+            raw = await readFile(fullPath, { encoding: "utf-8" });
+        } catch (err: any) {
+            if (err.code === "ENOENT") throw new Error(`no file found at "${path}"`);
+            if (err.code === "EISDIR") throw new Error(`"${path}" is a directory, not a file`);
+            throw err;
         }
-    }
+
+        const lines = toLines(raw);
+        const { content, totalLines, startLine, endLine } = paginateLines(lines, offsetLine, limitLine);
+
+        return {
+            content,
+            totalLines,
+            startLine,
+            endLine,
+        };
+    },
 });
 
-export default ReadFileTool;
+export default FsReadFileTool;

@@ -12,6 +12,7 @@
     "sourceMap": true,
 
     "strict": true,
+    "types": ["node"],
 
     "verbatimModuleSyntax": true,
 

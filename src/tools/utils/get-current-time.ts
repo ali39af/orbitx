@@ -1,43 +1,21 @@
-import MCPTool from "../../core/mcp.js";
+import { MCPTool } from "../../core/mcp.js";
 
-export const GetCurrentTimeTool = new MCPTool({
+/**
+ * Returns the current date/time. Agents should call this before writing
+ * time-sensitive search queries or reasoning about "latest"/"current" facts,
+ * since the model's own training data has no reliable sense of "now".
+ */
+export const GetCurrentTimeTool = () => new MCPTool({
     name: "get-current-time",
-    description: "Returns current time (24h) and today's date in Gregorian, Persian, and Islamic calendars.",
+    description: "get the current date and time (ISO string, unix timestamp and timezone)",
     inputs: [],
-    execute: async (_: string, __: Record<string, any>): Promise<any> => {
+    execute: async (): Promise<any> => {
         const now = new Date();
-        const time = now.toLocaleTimeString("en-US", {
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false
-        });
-
-        const gregorian = now.toLocaleDateString("en-US", {
-            weekday: "long",
-            year: "numeric",
-            month: "long",
-            day: "numeric"
-        });
-
-        const persian = now.toLocaleDateString("fa-IR-u-ca-persian", {
-            weekday: "long",
-            year: "numeric",
-            month: "long",
-            day: "numeric"
-        });
-
-        const hijri = now.toLocaleDateString("ar-SA-u-ca-islamic", {
-            weekday: "long",
-            year: "numeric",
-            month: "long",
-            day: "numeric"
-        });
 
         return {
-            time,
-            gregorian,
-            persian,
-            hijri
+            iso: now.toISOString(),
+            unix: Math.floor(now.getTime() / 1000),
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         };
     },
 });

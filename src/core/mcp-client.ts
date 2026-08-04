@@ -72,11 +72,13 @@ export class MCPClient extends MCP {
         const results = await Promise.all(connectionPromises);
 
         const connectionsTools = results.flat();
-        return [...this.#tools.map(t => ({
+        const clientTools = this.#tools.map(t => ({
             name: t.getOptions().name,
             description: t.getOptions().description,
             inputs: t.getOptions().inputs
-        })), ...connectionsTools];
+        }));
+        const clientToolNames = new Set(clientTools.map(ct => ct.name));
+        return [...clientTools, ...connectionsTools.filter(t => !clientToolNames.has(t.name))];
     }
 
     /**

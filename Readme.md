@@ -1,4 +1,4 @@
-[![OrbitX Logo](https://raw.githubusercontent.com/ali39af/orbitx/refs/heads/main/orbitx.png)](#)
+[![OrbitX Logo](https://raw.githubusercontent.com/ali39af/orbitx/refs/heads/main/orbitx.svg)](#)
 
 ## Installation
 

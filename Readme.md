@@ -13,7 +13,7 @@ The fastest way to get an agent running is `SimpleAgent` — give it a provider,
 ```ts
 import { OllamaProvider, SimpleAgent, GetCurrentTimeTool } from "orbitx";
 
-const ollamaProvider = new OllamaProvider("gemma3:latest");
+const ollamaProvider = new OllamaProvider("gemma4:e4b");
 
 const agent = new SimpleAgent({
   aiProvider: ollamaProvider,
@@ -79,7 +79,7 @@ OrbitX ships with pluggable AI providers so you can swap models without changing
 ```ts
 import { OllamaProvider } from "orbitx";
 
-const ollamaProvider = new OllamaProvider("gemma3:latest");
+const ollamaProvider = new OllamaProvider("gemma4:e4b");
 ```
 
 ### DeepSeek
@@ -234,7 +234,7 @@ import {
   GetCurrentTimeTool,
 } from "orbitx";
 
-const ollamaProvider = new OllamaProvider("gemma3:latest");
+const ollamaProvider = new OllamaProvider("gemma4:e4b");
 
 const connection = new MCPConnection();
 

@@ -3,6 +3,8 @@ export type { ChatResponse, Message, StreamCallback, ToolSchema, ToolCallRequest
 export { BaseAgent } from "./core/base-agent.js";
 export type { ExtractedSegment, ParsedToolCall } from "./core/base-agent.js";
 export { DeepSeekProvider } from "./core/deepseek-provider.js";
+export { OpenAIProvider } from "./core/openai-provider.js";
+export { AnthropicProvider } from "./core/anthropic-provider.js";
 export { MCPClient } from "./core/mcp-client.js";
 export { MCPConnection } from "./core/mcp-connection.js";
 export { MCPIPCConnection } from "./core/mcp-ipc-connection.js";

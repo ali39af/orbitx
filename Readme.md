@@ -90,6 +90,22 @@ import { DeepSeekProvider } from "orbitx";
 const deepseekProvider = new DeepSeekProvider("api-key", "deepseek-v4-flash");
 ```
 
+### Anthropic
+
+```ts
+import { AnthropicProvider } from "orbitx";
+
+const anthropicProvider = new AnthropicProvider("api-key", "claude-sonnet-5");
+```
+
+### OpenAI
+
+```ts
+import { OpenAIProvider } from "orbitx";
+
+const openaiProvider = new OpenAIProvider("api-key", "gpt-5");
+```
+
 ### Two providers: main + image
 
 An agent uses exactly two provider roles — `main` (drives the agent loop itself) and `image` (describes image tool output, e.g. screenshots, so the main conversation doesn't have to carry raw image bytes). Pass a single provider to use it for both roles, or an array to split them:

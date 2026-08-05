@@ -93,28 +93,28 @@ function textFromAnthropicContent(content: any[] | undefined): string {
 }
 
 export class AnthropicProvider extends AIProvider {
-    private client: Anthropic;
-    private model: string;
-    private supportsTools: boolean;
-    private supportsImages: boolean;
-    private contextWindow: number;
-    private maxTokens: number;
+    #client: Anthropic;
+    #model: string;
+    #supportsTools: boolean;
+    #supportsImages: boolean;
+    #contextWindow: number;
+    #maxTokens: number;
 
     constructor(apiKey: string, model: string = "claude-sonnet-5", options: { supportsTools?: boolean; supportsImages?: boolean; contextWindow?: number; maxTokens?: number } = {}) {
         super();
-        this.client = new Anthropic({ apiKey });
-        this.model = model;
-        this.supportsTools = options.supportsTools ?? true;
-        this.supportsImages = options.supportsImages ?? true;
-        this.contextWindow = options.contextWindow ?? MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
-        this.maxTokens = options.maxTokens ?? 4096;
+        this.#client = new Anthropic({ apiKey });
+        this.#model = model;
+        this.#supportsTools = options.supportsTools ?? true;
+        this.#supportsImages = options.supportsImages ?? true;
+        this.#contextWindow = options.contextWindow ?? MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
+        this.#maxTokens = options.maxTokens ?? 4096;
     }
 
     getCapabilities(): ProviderCapabilities {
         return {
-            supportsTools: this.supportsTools,
-            supportsImages: this.supportsImages,
-            contextWindow: this.contextWindow,
+            supportsTools: this.#supportsTools,
+            supportsImages: this.#supportsImages,
+            contextWindow: this.#contextWindow,
             safeUsageRatio: 0.5,
         };
     }
@@ -125,7 +125,7 @@ export class AnthropicProvider extends AIProvider {
         tools?: ToolSchema[]
     ): Promise<ChatResponse> {
         const { system, messages: formattedMessages } = toAnthropicMessages(messages);
-        const formattedTools = tools && tools.length > 0 && this.supportsTools
+        const formattedTools = tools && tools.length > 0 && this.#supportsTools
             ? toAnthropicTools(tools)
             : undefined;
 
@@ -134,9 +134,9 @@ export class AnthropicProvider extends AIProvider {
                 // Per-attempt accumulators live inside this closure so a
                 // failed/partial stream from a previous attempt never leaks
                 // into a retry's output — each attempt starts clean.
-                const stream = await this.client.messages.create({
-                    model: this.model,
-                    max_tokens: this.maxTokens,
+                const stream = await this.#client.messages.create({
+                    model: this.#model,
+                    max_tokens: this.#maxTokens,
                     ...(system ? { system } : {}),
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
@@ -203,9 +203,9 @@ export class AnthropicProvider extends AIProvider {
             });
         } else {
             return withRetry(async () => {
-                const response = await this.client.messages.create({
-                    model: this.model,
-                    max_tokens: this.maxTokens,
+                const response = await this.#client.messages.create({
+                    model: this.#model,
+                    max_tokens: this.#maxTokens,
                     ...(system ? { system } : {}),
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),

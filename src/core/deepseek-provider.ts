@@ -61,27 +61,27 @@ function fromOpenAIToolCalls(toolCalls: any[] | undefined): ToolCallRequest[] | 
 }
 
 export class DeepSeekProvider extends AIProvider {
-    private client: OpenAI;
-    private model: string;
-    private supportsTools: boolean;
-    private contextWindow: number;
+    #client: OpenAI;
+    #model: string;
+    #supportsTools: boolean;
+    #contextWindow: number;
 
     constructor(apiKey: string, model: string = "deepseek-v4-flash", options: { supportsTools?: boolean; contextWindow?: number } = {}) {
         super();
-        this.client = new OpenAI({
+        this.#client = new OpenAI({
             apiKey: apiKey,
             baseURL: "https://api.deepseek.com"
         });
-        this.model = model;
-        this.supportsTools = options.supportsTools ?? true;
-        this.contextWindow = options.contextWindow ?? MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
+        this.#model = model;
+        this.#supportsTools = options.supportsTools ?? true;
+        this.#contextWindow = options.contextWindow ?? MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
     }
 
     getCapabilities(): ProviderCapabilities {
         return {
-            supportsTools: this.supportsTools,
+            supportsTools: this.#supportsTools,
             supportsImages: false,
-            contextWindow: this.contextWindow,
+            contextWindow: this.#contextWindow,
             safeUsageRatio: 0.5,
         };
     }
@@ -92,7 +92,7 @@ export class DeepSeekProvider extends AIProvider {
         tools?: ToolSchema[]
     ): Promise<ChatResponse> {
         const formattedMessages = toOpenAIMessages(messages);
-        const formattedTools = tools && tools.length > 0 && this.supportsTools
+        const formattedTools = tools && tools.length > 0 && this.#supportsTools
             ? toOpenAIFunctionTools(tools)
             : undefined;
 
@@ -101,8 +101,8 @@ export class DeepSeekProvider extends AIProvider {
                 // Per-attempt accumulators live inside this closure so a
                 // failed/partial stream from a previous attempt never leaks
                 // into a retry's output — each attempt starts clean.
-                const stream = await this.client.chat.completions.create({
-                    model: this.model,
+                const stream = await this.#client.chat.completions.create({
+                    model: this.#model,
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
                     stream: true
@@ -156,8 +156,8 @@ export class DeepSeekProvider extends AIProvider {
             });
         } else {
             return withRetry(async () => {
-                const response = await this.client.chat.completions.create({
-                    model: this.model,
+                const response = await this.#client.chat.completions.create({
+                    model: this.#model,
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
                 });

@@ -8,6 +8,7 @@ export { AnthropicProvider } from "./core/anthropic-provider.js";
 export { MCPClient } from "./core/mcp-client.js";
 export { MCPConnection } from "./core/mcp-connection.js";
 export { MCPIPCConnection } from "./core/mcp-ipc-connection.js";
+export { MCPWSConnection } from "./core/mcp-ws-connection.js";
 export { MCPServer } from "./core/mcp-server.js";
 export { MCPTool, MCPCustomClass, generateRefId, normalizeToolOutput } from "./core/mcp.js";
 export type { MCP, MCPToolOutput } from "./core/mcp.js";

@@ -49,20 +49,20 @@ export class MCPClient extends MCP {
                 const onRead = (data: any) => {
                     if (data.topic === "getToolsCallback" && data.pid === pid) {
                         resolved = true;
-                        conn.off("read", onRead);
+                        conn.off("client_read", onRead);
                         resolve(data.tools || []);
                     }
                 };
 
-                conn.on("read", onRead);
-                conn.emit("write", {
+                conn.on("client_read", onRead);
+                conn.emit("write_to_server", {
                     pid,
                     topic: "getTools"
                 });
 
                 setTimeout(() => {
                     if (!resolved) {
-                        conn.off("read", onRead);
+                        conn.off("client_read", onRead);
                         resolve([]);
                     }
                 }, 2000);
@@ -81,14 +81,6 @@ export class MCPClient extends MCP {
         return [...clientTools, ...connectionsTools.filter(t => !clientToolNames.has(t.name))];
     }
 
-    /**
-     * Calls a tool and returns its result normalized into the standard
-     * MCPToolOutput contract ({type:"text"|"image", output:{...}}) —
-     * regardless of whether the tool lives in-process or across the
-     * IPC connection to a sandboxed MCPServer, and regardless of whether
-     * the tool itself already returns that shape or just a plain object
-     * (the legacy convention most existing tools use).
-     */
     async callTool(toolName: string, inputs: Record<string, any>) {
         const clientTool = this.#tools.find(t => t.getOptions().name == toolName);
         if (clientTool) {
@@ -102,7 +94,7 @@ export class MCPClient extends MCP {
 
                     const onRead = (data: any) => {
                         if (data.topic === "toolCallCallback" && data.pid === pid) {
-                            conn.off("read", onRead);
+                            conn.off("client_read", onRead);
                             if (!resolvedResult) {
                                 resolve(data.output || {});
                                 resolvedResult = true;
@@ -110,8 +102,8 @@ export class MCPClient extends MCP {
                         }
                     };
 
-                    conn.on("read", onRead);
-                    conn.emit("write", {
+                    conn.on("client_read", onRead);
+                    conn.emit("write_to_server", {
                         pid,
                         topic: "toolCall",
                         tool: toolName,

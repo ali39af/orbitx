@@ -130,6 +130,13 @@ Tools are grouped by domain. Import each group's array (e.g. `FsTools()`) to get
 
 ### Filesystem (`FsTools`)
 
+⚠️ EXTREMELY IMPORTANT WARNING ABOUT `FsWriteFileTool` / `FsDeleteTool` ⚠️
+
+🔴 CRITICAL: FsWriteFileTool and FsDeleteTool can permanently overwrite, delete, or corrupt existing files – no undo available.
+
+We strongly prefer running bash commands through MCPComputer, which provides a sandboxed, isolated environment – protecting your host system from accidental damage.
+
+
 | Tool | Purpose |
 |---|---|
 | `FsReadFileTool` | Read a text file, paging through large files by line. |
@@ -142,6 +149,12 @@ Tools are grouped by domain. Import each group's array (e.g. `FsTools()`) to get
 | `FsStatTool` | Check whether a path exists and get its metadata (type, size, modified time). |
 
 ### Bash / processes (`BashTools`)
+
+⚠️ EXTREMELY IMPORTANT WARNING ABOUT `BashRunTool` ⚠️
+
+🔴 CRITICAL: Shell commands can permanently delete files, corrupt data, modify system settings, or execute harmful operations – no undo available.
+
+We strongly prefer running bash commands through MCPComputer, which provides a sandboxed, isolated environment – protecting your host system from accidental damage.
 
 | Tool | Purpose |
 |---|---|
@@ -276,16 +289,24 @@ import { MCPIPCConnection } from "orbitx";
 const path =
   os.platform() === "win32" ? `\\\\.\\pipe\\mcp_test` : `/tmp/mcp_test.sock`;
 
-const ipcConnection = new MCPIPCConnection(path);
+const ipcConnection = new MCPIPCConnection({ mode: "server", socketPath: path });
 ```
+
+### WS Connections
+
+Run your MCP server as a separate process and connect to it over an web-socket communication (WS) channel:
+
+```ts
+import os from "os";
+import { MCPWSConnection } from "orbitx";
+
+const wsConnection = new MCPWSConnection({ mode: "server", host: "0.0.0.0", port: 9257, token: "1234" });
+```
+
 
 ## Creating a Custom Tool
 
 Define your own tools with `MCPTool` to extend an agent's capabilities and integrate with your own ecosystem.
-
-⚠️ EXTREMELY IMPORTANT WARNING ABOUT `FsWriteFileTool` / `FsDeleteTool` ⚠️
-
-🔴 CRITICAL: USE FILE-WRITING/DELETING TOOLS WITH EXTREME CAUTION – THEY CAN PERMANENTLY OVERWRITE, DELETE, OR CORRUPT EXISTING FILES ON YOUR SYSTEM WITHOUT UNDO CAPABILITY.
 
 ```ts
 import { MCPTool } from "orbitx";
@@ -366,4 +387,23 @@ const agent = new SimpleAgent({
 });
 ```
 
+## MCPComputer (Experimental Feature)
 
+Spins up a sandboxed Docker container running the MCP server and returns a ready-to-use client connection — no need to manage IPC sockets, ports, or tokens manually.
+
+```typescript
+import MCPComputer from "./core/mcp-computer.js";
+
+const computer = new MCPComputer("/path/to/mount", [3000, 8080]);
+await computer.start();
+
+const connection = computer.getConnection();
+computer.stop();
+```
+
+- **`mountPath`**: host directory mounted into the container
+- **`ports`**: ports to expose, or `"*"` for host network mode (Linux only, or Windows via WSL2)
+- **`getConnection()`**: returns a ready `MCPConnection` (IPC on Linux/macOS, WebSocket on Windows)
+- **`stop()`**: kills the container
+
+Requires the `aliafsordeh/orbitx-sandbox:0.1` image (pull it, or build from the `Dockerfile.sandbox` reference on our GitHub page).

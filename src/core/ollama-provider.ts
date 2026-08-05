@@ -56,29 +56,29 @@ function fromOllamaToolCalls(toolCalls: any[] | undefined): ToolCallRequest[] | 
 }
 
 export class OllamaProvider extends AIProvider {
-    private client: Ollama;
-    private model: string;
+    #client: Ollama;
+    #model: string;
     // Whether the currently-configured model supports Ollama's native
     // function-calling API. Ollama throws if `tools` is sent to a model
     // that doesn't support it, so this must be known ahead of time rather
     // than discovered by trial and error — callers should set this based on
     // the model card (most recent tool-capable families default to true).
-    private supportsTools: boolean;
-    private contextWindow: number;
+    #supportsTools: boolean;
+    #contextWindow: number;
 
     constructor(model: string, host: string = "http://localhost:11434", options: { supportsTools?: boolean; contextWindow?: number } = {}) {
         super();
-        this.client = new Ollama({ host });
-        this.model = model;
-        this.supportsTools = options.supportsTools ?? false;
-        this.contextWindow = options.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+        this.#client = new Ollama({ host });
+        this.#model = model;
+        this.#supportsTools = options.supportsTools ?? false;
+        this.#contextWindow = options.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
     }
 
     getCapabilities(): ProviderCapabilities {
         return {
-            supportsTools: this.supportsTools,
+            supportsTools: this.#supportsTools,
             supportsImages: true,
-            contextWindow: this.contextWindow,
+            contextWindow: this.#contextWindow,
             safeUsageRatio: 0.5,
         };
     }
@@ -88,10 +88,10 @@ export class OllamaProvider extends AIProvider {
         streamCallback?: StreamCallback,
         tools?: ToolSchema[]
     ): Promise<ChatResponse> {
-        const formattedMessages = toOllamaMessages(messages, this.supportsTools);
+        const formattedMessages = toOllamaMessages(messages, this.#supportsTools);
         // Never send `tools` to a model we don't know supports it — Ollama
         // throws rather than silently ignoring an unsupported `tools` field.
-        const formattedTools = tools && tools.length > 0 && this.supportsTools
+        const formattedTools = tools && tools.length > 0 && this.#supportsTools
             ? toOpenAIFunctionTools(tools)
             : undefined;
 
@@ -100,8 +100,8 @@ export class OllamaProvider extends AIProvider {
                 // Per-attempt accumulators live inside this closure so a
                 // failed/partial stream from a previous attempt never leaks
                 // into a retry's output — each attempt starts clean.
-                const stream = await this.client.chat({
-                    model: this.model,
+                const stream = await this.#client.chat({
+                    model: this.#model,
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
                     stream: true
@@ -141,8 +141,8 @@ export class OllamaProvider extends AIProvider {
             });
         } else {
             return withRetry(async () => {
-                const response = await this.client.chat({
-                    model: this.model,
+                const response = await this.#client.chat({
+                    model: this.#model,
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
                 });

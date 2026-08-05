@@ -73,29 +73,29 @@ function fromOpenAIToolCalls(toolCalls: any[] | undefined): ToolCallRequest[] | 
 }
 
 export class OpenAIProvider extends AIProvider {
-    private client: OpenAI;
-    private model: string;
-    private supportsTools: boolean;
-    private supportsImages: boolean;
-    private contextWindow: number;
+    #client: OpenAI;
+    #model: string;
+    #supportsTools: boolean;
+    #supportsImages: boolean;
+    #contextWindow: number;
 
     constructor(apiKey: string, model: string = "gpt-5", options: { supportsTools?: boolean; supportsImages?: boolean; contextWindow?: number; baseURL?: string } = {}) {
         super();
-        this.client = new OpenAI({
+        this.#client = new OpenAI({
             apiKey: apiKey,
             ...(options.baseURL ? { baseURL: options.baseURL } : {}),
         });
-        this.model = model;
-        this.supportsTools = options.supportsTools ?? true;
-        this.supportsImages = options.supportsImages ?? !NO_IMAGE_MODELS.has(model);
-        this.contextWindow = options.contextWindow ?? MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
+        this.#model = model;
+        this.#supportsTools = options.supportsTools ?? true;
+        this.#supportsImages = options.supportsImages ?? !NO_IMAGE_MODELS.has(model);
+        this.#contextWindow = options.contextWindow ?? MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
     }
 
     getCapabilities(): ProviderCapabilities {
         return {
-            supportsTools: this.supportsTools,
-            supportsImages: this.supportsImages,
-            contextWindow: this.contextWindow,
+            supportsTools: this.#supportsTools,
+            supportsImages: this.#supportsImages,
+            contextWindow: this.#contextWindow,
             safeUsageRatio: 0.5,
         };
     }
@@ -106,7 +106,7 @@ export class OpenAIProvider extends AIProvider {
         tools?: ToolSchema[]
     ): Promise<ChatResponse> {
         const formattedMessages = toOpenAIMessages(messages);
-        const formattedTools = tools && tools.length > 0 && this.supportsTools
+        const formattedTools = tools && tools.length > 0 && this.#supportsTools
             ? toOpenAIFunctionTools(tools)
             : undefined;
 
@@ -115,8 +115,8 @@ export class OpenAIProvider extends AIProvider {
                 // Per-attempt accumulators live inside this closure so a
                 // failed/partial stream from a previous attempt never leaks
                 // into a retry's output — each attempt starts clean.
-                const stream = await this.client.chat.completions.create({
-                    model: this.model,
+                const stream = await this.#client.chat.completions.create({
+                    model: this.#model,
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
                     stream: true,
@@ -171,8 +171,8 @@ export class OpenAIProvider extends AIProvider {
             });
         } else {
             return withRetry(async () => {
-                const response = await this.client.chat.completions.create({
-                    model: this.model,
+                const response = await this.#client.chat.completions.create({
+                    model: this.#model,
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
                 });

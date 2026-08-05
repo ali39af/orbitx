@@ -2,70 +2,77 @@ import os from "os";
 import { randomUUID } from "crypto";
 import { spawn, execFileSync } from "child_process";
 import fs from "fs";
+import net from "net";
 import path from "path";
+import type MCPConnection from "./mcp-connection.js";
+import MCPIPCConnection from "./mcp-ipc-connection.js";
+import MCPWSConnection from "./mcp-ws-connection.js";
+
+type ConnectionMode = "ipc" | "ws";
 
 export class MCPComputer {
     #mountPath: string;
     #ports: number[] | "*";
     #hostNetwork: boolean;
     #image: string;
-    #ipcPath: string;
     #containerName: string;
     #child: ReturnType<typeof spawn> | null = null;
     #exitHandler: (() => void) | null = null;
 
+    #connectionMode: ConnectionMode;
+    #ipcPath: string;
+    #wsPort: number;
+    #wsToken: string;
+
     constructor(mountPath: string, ports: number[] | "*", image: string = "orbitx-sandbox:0.1") {
-        if (os.platform() === "win32") {
-            throw new Error(
-                "This feature is not currently supported natively on Windows. " +
-                "Please run via WSL, or use a Unix-like filesystem (this feature needs one)."
-            );
-        }
+        this.#connectionMode = os.platform() === "win32" ? "ws" : "ipc";
 
         this.#hostNetwork = ports === "*";
-        if (this.#hostNetwork && os.platform() !== "linux") {
-            throw new Error(
-                "Host network mode (ports: \"*\") requires Docker's --network host, " +
-                "which is only supported on Linux. Pass an explicit array of ports instead."
-            );
-        }
 
         this.#mountPath = path.resolve(mountPath);
         this.#ports = ports;
         this.#image = image;
-        this.#ipcPath = `/tmp/mcp-server-${randomUUID()}`;
         this.#containerName = `mcp-sandbox-${randomUUID()}`;
+
+        this.#ipcPath = `/tmp/mcp-server-${randomUUID()}`;
+        this.#wsPort = 0;
+        this.#wsToken = randomUUID();
     }
 
-    getIPCSocketPath(): string {
-        return `${this.#ipcPath}/socket.sock`;
+    getConnection(wsHost: string = "localhost"): MCPConnection {
+        if (this.#connectionMode === "ipc") {
+            return new MCPIPCConnection({
+                socketPath: `${this.#ipcPath}/socket.sock`,
+                mode: "client",
+            });
+        }
+
+        if (!this.#wsPort) {
+            throw new Error("getConnection() is only available in 'ws' mode after start() has resolved a port.");
+        }
+
+        return new MCPWSConnection({
+            mode: "client",
+            url: `ws://${wsHost}:${this.#wsPort}`,
+            token: this.#wsToken,
+        });
     }
 
     getPresentsHostPath(): string {
         return path.join(this.#mountPath, "presents");
     }
 
-    isHostNetwork(): boolean {
-        return this.#hostNetwork;
-    }
-
-    getPortUrl(port: number, host: string = "localhost"): string {
-        if (!this.#hostNetwork && !(this.#ports as number[]).includes(port)) {
-            throw new Error(
-                `Port ${port} was not exposed for this sandbox. ` +
-                `Available ports: ${(this.#ports as number[]).join(", ") || "none"}. ` +
-                `Pass ports: "*" at construction time to allow any port.`
-            );
-        }
-        return `http://${host}:${port}`;
-    }
 
     #prepareHostPaths(containerUid = 1000, containerGid = 1000) {
         const workspaceHost = path.join(this.#mountPath, "workspace");
         const storageHost = path.join(this.#mountPath, "mcp-server-storage");
         const presentsHost = path.join(this.#mountPath, "presents");
         const userInputsHost = path.join(this.#mountPath, "user-inputs");
-        const dirs = [workspaceHost, storageHost, presentsHost, userInputsHost, this.#ipcPath];
+        const dirs = [workspaceHost, storageHost, presentsHost, userInputsHost];
+
+        if (this.#connectionMode === "ipc") {
+            dirs.push(this.#ipcPath);
+        }
 
         for (const dir of dirs) {
             fs.mkdirSync(dir, { recursive: true });
@@ -87,7 +94,25 @@ export class MCPComputer {
         }
     }
 
-    buildDockerArgs(): string[] {
+    /** Finds a free TCP port on the host by briefly binding to port 0. */
+    #pickFreePort(): Promise<number> {
+        return new Promise((resolve, reject) => {
+            const srv = net.createServer();
+            srv.unref();
+            srv.on("error", reject);
+            srv.listen(0, () => {
+                const address = srv.address();
+                if (address && typeof address === "object") {
+                    const port = address.port;
+                    srv.close(() => resolve(port));
+                } else {
+                    srv.close(() => reject(new Error("Could not determine a free port.")));
+                }
+            });
+        });
+    }
+
+    #buildDockerArgs(): string[] {
         const workspaceHost = path.join(this.#mountPath, "workspace");
         const storageHost = path.join(this.#mountPath, "mcp-server-storage");
         const presentsHost = path.join(this.#mountPath, "presents");
@@ -100,9 +125,19 @@ export class MCPComputer {
             "-v", `${storageHost}:/home/ubuntu/mcp-data`,
             "-v", `${presentsHost}:/home/ubuntu/presents`,
             "-v", `${userInputsHost}:/home/ubuntu/user-inputs`,
-            "-v", `${this.#ipcPath}:/tmp/mcp-server`,
             "-e", "PRESENT_PATH=/home/ubuntu/presents",
         ];
+
+        if (this.#connectionMode === "ipc") {
+            args.push("-v", `${this.#ipcPath}:/tmp/mcp-server`);
+            args.push("-e", "CONNECTION_MODE=IPC");
+            args.push("-e", "CONNECTION_PATH=/tmp/mcp-server/socket.sock");
+        } else {
+            args.push("-e", "CONNECTION_MODE=WS");
+            args.push("-e", "CONNECTION_HOST=0.0.0.0");
+            args.push("-e", `CONNECTION_PORT=${this.#wsPort}`);
+            args.push("-e", `CONNECTION_TOKEN=${this.#wsToken}`);
+        }
 
         if (this.#hostNetwork) {
             args.push("--network", "host");
@@ -110,16 +145,25 @@ export class MCPComputer {
             for (const port of this.#ports as number[]) {
                 args.push("-p", `${port}:${port}`);
             }
+            // The WS control channel needs its own published port too, since
+            // it isn't part of the user-facing #ports list.
+            if (this.#connectionMode === "ws") {
+                args.push("-p", `${this.#wsPort}:${this.#wsPort}`);
+            }
         }
 
         args.push(this.#image);
         return args;
     }
 
-    start() {
+    async start() {
+        if (this.#connectionMode === "ws") {
+            this.#wsPort = await this.#pickFreePort();
+        }
+
         this.#prepareHostPaths();
 
-        const args = this.buildDockerArgs();
+        const args = this.#buildDockerArgs();
         const child = spawn("docker", args, { stdio: "ignore" });
         this.#child = child;
 

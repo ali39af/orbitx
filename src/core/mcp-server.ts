@@ -16,11 +16,11 @@ export class MCPServer extends MCP {
         if (!rng)
             rng = new MCPRNG(storage);
         this.#rng = rng;
-        this.#connection.on("read", (data: any) => {
+        this.#connection.on("server_read", (data: any) => {
             const topic = data.topic;
             const pid = data.pid;
             if (topic == "getTools") {
-                this.#connection.emit("write", {
+                this.#connection.emit("write_to_client", {
                     pid,
                     topic: "getToolsCallback",
                     tools: this.#tools.map(tool => ({
@@ -34,13 +34,13 @@ export class MCPServer extends MCP {
                 const tool = this.#tools.find(t => t.getOptions().name == data.tool);
                 if (tool) {
                     tool.getOptions().execute(data.envID, data.inputs, tool.getMCP(), tool.getOptions().customClass).then((response) => {
-                        this.#connection.emit("write", {
+                        this.#connection.emit("write_to_client", {
                             pid,
                             topic: "toolCallCallback",
                             output: response
                         });
                     }).catch(error => {
-                        this.#connection.emit("write", {
+                        this.#connection.emit("write_to_client", {
                             pid,
                             topic: "toolCallCallback",
                             output: { error: error.message }

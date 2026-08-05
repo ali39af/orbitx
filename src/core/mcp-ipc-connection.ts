@@ -2,101 +2,113 @@ import * as net from "net";
 import * as fs from "fs";
 import MCPConnection from "./mcp-connection.js";
 
-type Role = "server" | "client" | "pending";
+export interface MCPIPCConnectionOptions {
+    /** Filesystem path of the IPC socket. */
+    socketPath: string;
+    /**
+     * "server": bind the socket and listen for a peer to connect.
+     * "client": connect out to an existing socket.
+     */
+    mode: "server" | "client";
+    /** Reconnect delay (ms) for client mode after a disconnect. Default 500. */
+    reconnectDelay?: number;
+}
 
 export class MCPIPCConnection extends MCPConnection {
-    private readonly socketPath: string;
-    private socket: net.Socket | null = null;
-    private server: net.Server | null = null;
-    private role: Role = "pending";
-    private writeBuffer: Buffer[] = [];
-    private readBuffer = "";
+    #options: MCPIPCConnectionOptions;
+    #socket: net.Socket | null = null;
+    #server: net.Server | null = null;
+    #writeBuffer: Buffer[] = [];
+    #readBuffer = "";
+    #closed = false;
 
-    constructor(socketPath: string) {
+    constructor(options: MCPIPCConnectionOptions) {
         super(true);
-        this.socketPath = socketPath;
+        this.#options = options;
 
-        this.on("write", (data: unknown) => {
-            this._sendJSON(data);
+        this.on("write_to_server", (data: unknown) => {
+            if (this.#options.mode === "client") this.#sendJSON(data);
+        });
+        this.on("write_to_client", (data: unknown) => {
+            if (this.#options.mode === "server") this.#sendJSON(data);
         });
 
-        setTimeout(() => {
-            this._tryConnect();
-        }, Math.random() * 200); // Pervent Race Condtion
+        if (this.#options.mode === "server") {
+            this.#startServer();
+        } else {
+            this.#connectClient();
+        }
     }
 
     close(): void {
-        this.socket?.destroy();
-        this.server?.close();
-        this._cleanSocketFile();
+        this.#closed = true;
+        this.#socket?.destroy();
+        this.#server?.close();
+        if (this.#options.mode === "server") {
+            this.#cleanSocketFile();
+        }
     }
 
-    private _tryConnect(): void {
-        const sock = net.createConnection({ path: this.socketPath });
+    #startServer(): void {
+        this.emit("role", "server");
 
-        sock.once("connect", () => {
-            this.role = "client";
-            this.emit("role", "client");
-            this._attachSocket(sock);
-        });
-
-        sock.once("error", (err: NodeJS.ErrnoException) => {
-            if (err.code === "ENOENT" || err.code === "ECONNREFUSED") {
-                sock.destroy();
-                this._becomeServer();
-            } else {
-                this.emit("error", err);
-            }
-        });
-    }
-
-    private _becomeServer(): void {
-        this._cleanSocketFile();
+        this.#cleanSocketFile();
 
         const srv = net.createServer((peer) => {
-            this.role = "server";
-            this.emit("role", "server");
-
-            srv.close();
-
-            this._attachSocket(peer);
+            this.#attachSocket(peer);
         });
 
         srv.on("error", (err) => this.emit("error", err));
 
-        srv.listen({ path: this.socketPath }, () => {
-            this.server = srv;
-            this.emit("listening", this.socketPath);
+        srv.listen({ path: this.#options.socketPath }, () => {
+            this.#server = srv;
+            this.emit("listening", this.#options.socketPath);
         });
     }
 
-    private _attachSocket(sock: net.Socket): void {
-        this.socket = sock;
+    #connectClient(): void {
+        this.emit("role", "client");
 
-        for (const chunk of this.writeBuffer) {
+        const sock = net.createConnection({ path: this.#options.socketPath });
+
+        sock.once("connect", () => {
+            this.#attachSocket(sock);
+        });
+
+        sock.once("error", (err: NodeJS.ErrnoException) => {
+            this.emit("error", err);
+            this.#maybeReconnect();
+        });
+    }
+
+    #attachSocket(sock: net.Socket): void {
+        this.#socket = sock;
+
+        for (const chunk of this.#writeBuffer) {
             sock.write(chunk);
         }
-        this.writeBuffer = [];
+        this.#writeBuffer = [];
 
         sock.setEncoding("utf8");
 
         sock.on("data", (chunk: string) => {
-            this._handleIncoming(chunk);
+            this.#handleIncoming(chunk);
         });
 
         sock.on("end", () => {
             this.emit("disconnected");
-            this._maybeReconnect();
+            if (this.#socket === sock) this.#socket = null;
+            this.#maybeReconnect();
         });
 
         sock.on("error", (err: NodeJS.ErrnoException) => {
             this.emit("error", err);
         });
 
-        this.emit("connected", this.role);
+        this.emit("connected", this.#options.mode);
     }
 
-    private _sendJSON(data: unknown): void {
+    #sendJSON(data: unknown): void {
         let line: string;
         try {
             line = JSON.stringify(data) + "\n";
@@ -107,19 +119,19 @@ export class MCPIPCConnection extends MCPConnection {
 
         const chunk = Buffer.from(line, "utf8");
 
-        if (this.socket && !this.socket.destroyed) {
-            this.socket.write(chunk);
+        if (this.#socket && !this.#socket.destroyed) {
+            this.#socket.write(chunk);
         } else {
-            this.writeBuffer.push(chunk);
+            this.#writeBuffer.push(chunk);
         }
     }
 
-    private _handleIncoming(chunk: string): void {
-        this.readBuffer += chunk;
+    #handleIncoming(chunk: string): void {
+        this.#readBuffer += chunk;
 
-        const lines = this.readBuffer.split("\n");
+        const lines = this.#readBuffer.split("\n");
 
-        this.readBuffer = lines.pop() ?? "";
+        this.#readBuffer = lines.pop() ?? "";
 
         for (const line of lines) {
             const trimmed = line.trim();
@@ -127,25 +139,29 @@ export class MCPIPCConnection extends MCPConnection {
 
             try {
                 const parsed = JSON.parse(trimmed);
-                this.emit("read", parsed);
+                if (this.#options.mode === "server") {
+                    this.emit("server_read", parsed);
+                } else {
+                    this.emit("client_read", parsed);
+                }
             } catch {
                 this.emit("error", new Error(`MCPIPCConnection: malformed JSON – ${trimmed}`));
             }
         }
     }
 
-    private _cleanSocketFile(): void {
+    #cleanSocketFile(): void {
         try {
-            fs.unlinkSync(this.socketPath);
+            fs.unlinkSync(this.#options.socketPath);
         } catch { }
     }
 
-    private _maybeReconnect(): void {
-        if (this.role === "client") {
+    #maybeReconnect(): void {
+        if (this.#closed) return;
+        if (this.#options.mode === "client") {
             setTimeout(() => {
-                this.role = "pending";
-                this._tryConnect();
-            }, 500);
+                this.#connectClient();
+            }, this.#options.reconnectDelay ?? 500);
         }
     }
 }

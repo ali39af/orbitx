@@ -43,12 +43,14 @@
     "@anthropic-ai/sdk": "^0.115.0",
     "ollama": "^0.6.3",
     "openai": "^6.45.0",
-    "puppeteer-core": "^24.43.1"
+    "puppeteer-core": "^24.43.1",
+    "ws": "^8.21.2"
   },
   "devDependencies": {
     "@inquirer/prompts": "^8.5.2",
     "@types/express": "^5.0.6",
     "@types/node": "^26.1.2",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   }

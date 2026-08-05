@@ -392,7 +392,7 @@ const agent = new SimpleAgent({
 Spins up a sandboxed Docker container running the MCP server and returns a ready-to-use client connection — no need to manage IPC sockets, ports, or tokens manually.
 
 ```typescript
-import MCPComputer from "./core/mcp-computer.js";
+import { MCPComputer } from "orbitx";
 
 const computer = new MCPComputer("/path/to/mount", [3000, 8080]);
 await computer.start();

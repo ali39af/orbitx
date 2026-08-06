@@ -27,7 +27,7 @@
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build",
-    "test": "echo \"No tests\""
+    "test": "tsx --test src/tests/index.ts"
   },
   "keywords": [
     "AI",

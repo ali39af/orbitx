@@ -40,7 +40,7 @@ export class MCPIPCConnection extends MCPConnection {
         }
     }
 
-    close(): void {
+    override close(): void {
         this.#closed = true;
         this.#socket?.destroy();
         this.#server?.close();

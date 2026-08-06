@@ -29,6 +29,20 @@ export class MCPConnection extends EventEmitter {
             this.on("write_to_client", (data) => this.emit("client_read", data));
         }
     }
+
+    /**
+     * Close the connection.
+     *
+     * Default (loopback) implementation just removes all listeners so no
+     * further events are emitted or received. Subclasses backed by a real
+     * transport (IPC socket, WebSocket, etc.) should override this to tear
+     * down that transport (e.g. socket.close(), ws.terminate()) and should
+     * typically call `super.close()` (or otherwise remove listeners) as
+     * part of their own cleanup.
+     */
+    close(): void {
+        this.removeAllListeners();
+    }
 }
 
 export default MCPConnection;

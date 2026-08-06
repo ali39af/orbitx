@@ -1,6 +1,6 @@
 import os from "os";
 import { randomUUID } from "crypto";
-import { spawn, execFileSync } from "child_process";
+import { spawn, execFileSync, ChildProcess } from "child_process";
 import fs from "fs";
 import net from "net";
 import path from "path";
@@ -24,6 +24,8 @@ export class MCPComputer {
     #wsPort: number;
     #wsToken: string;
 
+    #connection: MCPConnection | undefined;
+
     constructor(mountPath: string, ports: number[] | "*", image: string = "orbitx-sandbox:0.1") {
         this.#connectionMode = os.platform() === "win32" ? "ws" : "ipc";
 
@@ -41,21 +43,23 @@ export class MCPComputer {
 
     getConnection(wsHost: string = "localhost"): MCPConnection {
         if (this.#connectionMode === "ipc") {
-            return new MCPIPCConnection({
+            this.#connection = new MCPIPCConnection({
                 socketPath: `${this.#ipcPath}/socket.sock`,
                 mode: "client",
             });
+            return this.#connection;
         }
 
         if (!this.#wsPort) {
             throw new Error("getConnection() is only available in 'ws' mode after start() has resolved a port.");
         }
 
-        return new MCPWSConnection({
+        this.#connection = new MCPWSConnection({
             mode: "client",
             url: `ws://${wsHost}:${this.#wsPort}`,
             token: this.#wsToken,
         });
+        return this.#connection;
     }
 
     getPresentsHostPath(): string {
@@ -145,8 +149,6 @@ export class MCPComputer {
             for (const port of this.#ports as number[]) {
                 args.push("-p", `${port}:${port}`);
             }
-            // The WS control channel needs its own published port too, since
-            // it isn't part of the user-facing #ports list.
             if (this.#connectionMode === "ws") {
                 args.push("-p", `${this.#wsPort}:${this.#wsPort}`);
             }
@@ -156,7 +158,7 @@ export class MCPComputer {
         return args;
     }
 
-    async start() {
+    async start(): Promise<void> {
         if (this.#connectionMode === "ws") {
             this.#wsPort = await this.#pickFreePort();
         }
@@ -164,7 +166,7 @@ export class MCPComputer {
         this.#prepareHostPaths();
 
         const args = this.#buildDockerArgs();
-        const child = spawn("docker", args, { stdio: "ignore" });
+        const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
         this.#child = child;
 
         this.#exitHandler = () => {
@@ -176,17 +178,57 @@ export class MCPComputer {
         };
         process.on("exit", this.#exitHandler);
 
-        return child;
+        await this.#waitForReadyLog(child);
     }
 
-    stop() {
+    #waitForReadyLog(child: ChildProcess, timeoutMs = 30_000): Promise<void> {
+        const READY_RE = /MCP Server Stared/;
+
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                child.stdout?.off("data", onData);
+                reject(new Error(`timed out waiting for container ready log after ${timeoutMs}ms`));
+            }, timeoutMs);
+
+            const onData = (chunk: Buffer) => {
+                if (READY_RE.test(chunk.toString())) {
+                    clearTimeout(timer);
+                    child.stdout?.off("data", onData);
+                    resolve();
+                }
+            };
+
+            child.stdout?.on("data", onData);
+        });
+    }
+
+    async stop(): Promise<void> {
         if (this.#exitHandler) {
-            this.#exitHandler();
             process.off("exit", this.#exitHandler);
             this.#exitHandler = null;
         }
 
+        const child = this.#child;
         this.#child = null;
+
+        if (!child) {
+            return;
+        }
+
+        const exited = new Promise<void>((resolve) => {
+            child.once("exit", () => resolve());
+            child.once("error", () => resolve());
+        });
+
+        try {
+            execFileSync("docker", ["kill", this.#containerName], { stdio: "ignore" });
+        } catch {
+            // already stopped, fine
+        }
+
+        this.#connection?.close();
+
+        await exited;
     }
 
     getInstructions(): string {

@@ -77,7 +77,7 @@ export class MCPWSConnection extends MCPConnection {
         }
     }
 
-    close(): void {
+    override close(): void {
         this.#closed = true;
         this.#ws?.close();
         this.#wss?.close();
@@ -91,10 +91,10 @@ export class MCPWSConnection extends MCPConnection {
 
         const httpServer = useTLS
             ? https.createServer({
-                  key: this.#options.tls!.key,
-                  cert: this.#options.tls!.cert,
-                  ca: this.#options.tls!.ca,
-              })
+                key: this.#options.tls!.key,
+                cert: this.#options.tls!.cert,
+                ca: this.#options.tls!.ca,
+            })
             : http.createServer();
 
         this.#httpServer = httpServer;

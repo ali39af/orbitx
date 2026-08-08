@@ -6,6 +6,28 @@
 npm install orbitx
 ```
 
+## Demo
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://www.youtube.com/watch?v=nuIhIBdBjTI">
+        <img src="https://img.youtube.com/vi/nuIhIBdBjTI/maxresdefault.jpg" width="400" alt="Demo 1">
+      </a>
+      <br>
+      <b>Demo 1</b>
+    </td>
+    <td align="center">
+      <a href="https://www.youtube.com/watch?v=Go1PIYo0sFw">
+        <img src="https://img.youtube.com/vi/Go1PIYo0sFw/maxresdefault.jpg" width="400" alt="Demo 2">
+      </a>
+      <br>
+      <b>Demo 2</b>
+    </td>
+  </tr>
+</table>
+
+
 ## Quick Start
 
 The fastest way to get an agent running is `SimpleAgent` — give it a provider, an instruction, and a list of tools/skills.
@@ -398,7 +420,7 @@ const computer = new MCPComputer("/path/to/mount", [3000, 8080]);
 await computer.start();
 
 const connection = computer.getConnection();
-computer.stop();
+await computer.stop();
 ```
 
 - **`mountPath`**: host directory mounted into the container

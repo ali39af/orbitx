@@ -73,6 +73,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libvulkan1 \
     libasound2t64 \
     xdg-utils \
+    zip \
+    unzip \
+    p7zip-full \
+    tar \
+    gzip \
+    bzip2 \
+    xz-utils \
     && apt-get clean
 
 # --- use the pre-existing UID/GID 1000 "ubuntu" user, give it sudo + workspace ---

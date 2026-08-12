@@ -51,7 +51,7 @@ export interface ChatResponse {
 }
 
 export type StreamCallback = (chunk: {
-    role: "assistant" | "tool";
+    role: "assistant" | "tool" | "user";
     content: string;
     done: boolean;
     /** Present on the final ("done") assistant chunk when the model requested native tool calls this turn. */

@@ -43,7 +43,7 @@ const agent = new SimpleAgent({
   tools: [GetCurrentTimeTool()],
 });
 
-let oldRole: "assistant" | "tool" | undefined;
+let oldRole: "assistant" | "tool" | "user" | undefined;
 
 agent.run("what is current time?", (chunk) => {
   if (oldRole !== chunk.role) {
@@ -285,7 +285,7 @@ const agent = new BaseAgent({
   allowedTools: [GetCurrentTimeTool()],
 });
 
-let oldRole: "assistant" | "tool" | undefined;
+let oldRole: "assistant" | "tool" | "user" | undefined;
 
 agent.run("what is current time?", (chunk) => {
   if (oldRole !== chunk.role) {

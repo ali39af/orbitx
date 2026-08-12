@@ -360,6 +360,7 @@ Output only this JSON line, nothing else:
             if (firstIteration) {
                 this.#messagesFull.push({ role: "user", content: prompt });
                 this.#messagesCompact.push({ role: "user", content: prompt });
+                streamCallback?.({ role: "user", content: prompt, done: true });
             }
             firstIteration = false;
 
@@ -428,8 +429,8 @@ Output only this JSON line, nothing else:
             }
 
             const stopAfterToolCall = this.#allowedTools.filter(t => nativeCalls.map(nc => nc.name).includes(t.getOptions().name)).find(t => t.getOptions().stopIterationAfterUsingThisTool)
-            
-            
+
+
             keepGoing = !stopAfterToolCall && calledAnyTool || memorizeEventHappened;
 
 
@@ -439,6 +440,7 @@ Output only this JSON line, nothing else:
                 const run = this.#incomingRun[i];
                 this.#messagesFull.push({ role: "user", content: run.prompt });
                 this.#messagesCompact.push({ role: "user", content: run.prompt });
+                streamCallback?.({ role: "user", content: run.prompt, done: true });
                 clearTimeout(run.timeout);
                 clearInterval(run.interval);
                 run.res(true);

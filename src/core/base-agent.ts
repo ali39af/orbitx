@@ -351,17 +351,18 @@ Output only this JSON line, nothing else:
 
             const systemPrompt = this.#getOrBuildSystemPrompt();
 
-            const chat = await this.#mainProvider.chat([
-                { role: "system", content: systemPrompt },
-                ...this.#messagesCompact,
-                ...(firstIteration ? [{ role: "user" as const, content: prompt }] : []),
-            ], streamCallback, allTools);
-
             if (firstIteration) {
                 this.#messagesFull.push({ role: "user", content: prompt });
                 this.#messagesCompact.push({ role: "user", content: prompt });
                 await streamCallback?.({ role: "user", content: prompt, done: true });
             }
+
+            const chat = await this.#mainProvider.chat([
+                { role: "system", content: systemPrompt },
+                ...this.#messagesCompact
+            ], streamCallback, allTools);
+
+            
             firstIteration = false;
 
             const assistantMessage: Message = chat.toolCalls?.length

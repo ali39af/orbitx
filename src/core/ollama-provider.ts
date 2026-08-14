@@ -116,7 +116,7 @@ export class OllamaProvider extends AIProvider {
                     const content = chunk.message?.content || "";
                     if (content) {
                         fullContent += content;
-                        streamCallback({ role: "assistant", content, done: false });
+                        await streamCallback({ role: "assistant", content, done: false });
                     }
 
                     if (chunk.message?.tool_calls?.length) {
@@ -131,7 +131,7 @@ export class OllamaProvider extends AIProvider {
                     }
                 }
 
-                streamCallback({ role: "assistant", content: "", done: true, ...(toolCalls ? { toolCalls } : {}) });
+                await streamCallback({ role: "assistant", content: "", done: true, ...(toolCalls ? { toolCalls } : {}) });
                 return {
                     content: fullContent,
                     inputTokens: promptEvalCount,

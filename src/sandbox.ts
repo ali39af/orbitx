@@ -41,4 +41,4 @@ const tools = [
     ...UtilTools()
 ];
 tools.forEach(tool => _MCPServer.registerTool(tool));
-console.log(`MCP Server Stared at "${_ConnectionMode == "IPC" ? _ConnectionPath : _ConnectionHost + ":" + _ConnectionPort}" with ${tools.map(t => t.getOptions().name)}`)
+console.log(`MCP Server Stared at "${_ConnectionMode == "IPC" ? _ConnectionPath : _ConnectionHost + ":" + _ConnectionPort}" with ${tools.map(t => t.getOptions().name)}`);

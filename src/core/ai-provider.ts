@@ -60,7 +60,7 @@ export type StreamCallback = (chunk: {
     toolCallId?: string;
     /** Present on "tool"-role chunks — the name of the tool that was called. */
     toolName?: string;
-}) => void;
+}) => Promise<void> | void;
 
 /**
  * Static capability + limits description for a provider/model pair. This

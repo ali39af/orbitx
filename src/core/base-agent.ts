@@ -360,7 +360,7 @@ Output only this JSON line, nothing else:
             if (firstIteration) {
                 this.#messagesFull.push({ role: "user", content: prompt });
                 this.#messagesCompact.push({ role: "user", content: prompt });
-                streamCallback?.({ role: "user", content: prompt, done: true });
+                await streamCallback?.({ role: "user", content: prompt, done: true });
             }
             firstIteration = false;
 
@@ -390,7 +390,7 @@ Output only this JSON line, nothing else:
                 };
                 this.#messagesFull.push(toolMessage);
                 this.#messagesCompact.push(toolMessage);
-                streamCallback?.({ role: "tool", content: result.resultText, done: true, toolCallId: result.id, toolName: result.name });
+                await streamCallback?.({ role: "tool", content: result.resultText, done: true, toolCallId: result.id, toolName: result.name });
             }
 
             let memorizeEventHappened = false;
@@ -410,7 +410,7 @@ Output only this JSON line, nothing else:
 
                 for (const mc of await this.#extractToolCalls(memChat.content)) {
                     const toolResponse = await this.#dispatchLegacyTool(mc);
-                    streamCallback?.({ role: "tool", content: toolResponse, done: true, toolCallId: mc.id, toolName: mc.tool });
+                    await streamCallback?.({ role: "tool", content: toolResponse, done: true, toolCallId: mc.id, toolName: mc.tool });
                 }
 
                 this.#messagesCompact = [];
@@ -440,7 +440,7 @@ Output only this JSON line, nothing else:
                 const run = this.#incomingRun[i];
                 this.#messagesFull.push({ role: "user", content: run.prompt });
                 this.#messagesCompact.push({ role: "user", content: run.prompt });
-                streamCallback?.({ role: "user", content: run.prompt, done: true });
+                await streamCallback?.({ role: "user", content: run.prompt, done: true });
                 clearTimeout(run.timeout);
                 clearInterval(run.interval);
                 run.res(true);

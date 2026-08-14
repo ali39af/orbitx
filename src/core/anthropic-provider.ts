@@ -166,7 +166,7 @@ export class AnthropicProvider extends AIProvider {
                     if (event.type === "content_block_delta") {
                         if (event.delta?.type === "text_delta" && event.delta.text) {
                             fullContent += event.delta.text;
-                            streamCallback({ role: "assistant", content: event.delta.text, done: false });
+                            await streamCallback({ role: "assistant", content: event.delta.text, done: false });
                         }
                         if (event.delta?.type === "input_json_delta" && toolBlocks[event.index]) {
                             toolBlocks[event.index].inputJson += event.delta.partial_json || "";
@@ -192,7 +192,7 @@ export class AnthropicProvider extends AIProvider {
                     })
                     : undefined;
 
-                streamCallback({ role: "assistant", content: "", done: true, ...(toolCalls ? { toolCalls } : {}) });
+                await streamCallback({ role: "assistant", content: "", done: true, ...(toolCalls ? { toolCalls } : {}) });
 
                 return {
                     content: fullContent,

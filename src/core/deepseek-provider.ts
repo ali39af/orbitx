@@ -118,7 +118,7 @@ export class DeepSeekProvider extends AIProvider {
                     const content = delta?.content || "";
                     if (content) {
                         fullContent += content;
-                        streamCallback({ role: "assistant", content, done: false });
+                        await streamCallback({ role: "assistant", content, done: false });
                     }
 
                     if (delta?.tool_calls) {
@@ -145,7 +145,7 @@ export class DeepSeekProvider extends AIProvider {
                     })
                     : undefined;
 
-                streamCallback({ role: "assistant", content: "", done: true, ...(toolCalls ? { toolCalls } : {}) });
+                await streamCallback({ role: "assistant", content: "", done: true, ...(toolCalls ? { toolCalls } : {}) });
 
                 return {
                     content: fullContent,

@@ -5,18 +5,26 @@ import { MCP, normalizeToolOutput } from "./mcp.js";
 import MCPRNG from "./mcp-rng.js";
 import type MCPStorage from "./mcp-storage.js";
 import MCPFSStorage from "./mcp-fs-storage.js";
+import MCPFilter from "./mcp-filter.js";
 
 export class MCPClient extends MCP {
     #connections;
     #storage;
     #rng;
+    #mcpFilter;
     #tools: MCPTool<any>[] = [];
     #envID;
-    constructor(envID: string, connection: MCPConnection | MCPConnection[], storage: MCPStorage = new MCPFSStorage(), rng?: MCPRNG) {
+    constructor(envID: string, connection: MCPConnection | MCPConnection[], storage: MCPStorage = new MCPFSStorage(), rng?: MCPRNG, mcpFilter?: MCPFilter) {
         super();
         this.#storage = storage;
         if (!rng)
             rng = new MCPRNG(storage);
+        if (!mcpFilter)
+            mcpFilter = new MCPFilter([
+                // /\b(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.)\d{1,3}\.\d{1,3}\b/g // Prevent any local ip leakage by default you can pass empty MCPFilter to disable it 
+                // we add some default security roles after this feature become stable
+            ]);
+        this.#mcpFilter = mcpFilter;
         this.#rng = rng;
         this.#connections = Array.isArray(connection) ? connection : [connection];
         this.#envID = envID;
@@ -85,7 +93,7 @@ export class MCPClient extends MCP {
         const clientTool = this.#tools.find(t => t.getOptions().name == toolName);
         if (clientTool) {
             const raw = await clientTool.getOptions().execute(this.#envID, inputs, clientTool.getMCP(), clientTool.getOptions().customClass);
-            return normalizeToolOutput(raw);
+            return this.#mcpFilter.filter(normalizeToolOutput(raw));
         } else {
             const raw = await new Promise<any>((resolve) => {
                 let resolvedResult = false;
@@ -112,7 +120,7 @@ export class MCPClient extends MCP {
                     });
                 });
             });
-            return normalizeToolOutput(raw);
+            return this.#mcpFilter.filter(normalizeToolOutput(raw));
         }
     }
 

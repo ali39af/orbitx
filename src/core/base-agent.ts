@@ -433,8 +433,6 @@ Output only this JSON line, nothing else:
 
 
             keepGoing = !stopAfterToolCall && calledAnyTool || memorizeEventHappened;
-
-
         } while (keepGoing && this.#incomingRun.length == 0);
         if (this.#incomingRun.length > 1) {
             for (let i = 0; i < this.#incomingRun.length - 1; i++) {

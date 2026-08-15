@@ -23,6 +23,7 @@ export type { AgentProviderRole, AgentProviderEntry, AgentProvidersInput, Resolv
 export { MCPRNG } from "./core/mcp-rng.js";
 export { MCPStorage } from "./core/mcp-storage.js";
 export { MCPFSStorage } from "./core/mcp-fs-storage.js";
+export { MCPFilter } from "./core/mcp-filter.js";
 
 
 export { SimpleAgent } from "./templates/simple.js";

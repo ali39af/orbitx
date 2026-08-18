@@ -147,7 +147,6 @@ export const FsListDirTool = () => new MCPTool<FsInteraction>({
         const page = entries.slice(start, end);
 
         return {
-            entries: page,
             result: page,
             total: totalResult,
             totalResult,

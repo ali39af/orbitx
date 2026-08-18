@@ -1,5 +1,7 @@
 [![OrbitX Logo](https://raw.githubusercontent.com/ali39af/orbitx/refs/heads/main/orbitx.svg)](#)
 
+📖 **[Full documentation](./docs/index.md)** — a deeper, page-by-page guide (providers, agents, tools, skills, MCP transport, streaming, full API reference), written to be useful both to humans learning the library and to AI agents coding against it.
+
 ## Installation
 
 ```bash

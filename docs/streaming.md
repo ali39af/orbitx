@@ -7,7 +7,7 @@ type StreamCallback = (chunk: {
   role: "assistant" | "tool" | "user";
   content: string;
   done: boolean;
-  toolCalls?: ToolCallRequest[];  // only on the final ("done") assistant chunk, if the model called tools
+  toolCalls?: ToolCallRequest[];  // a single just-finished call, as a 1-element array — see "Incremental tool-call chunks" below
   toolCallId?: string;            // on "tool"-role chunks
   toolName?: string;              // on "tool"-role chunks
   thinking?: string;               // reasoning-text delta, mirroring `content` — see "Thinking chunks" below
@@ -18,7 +18,7 @@ type StreamCallback = (chunk: {
 
 1. **`role: "user"`** — one chunk, `done: true`, echoing the prompt that was just added to history (either the one you passed to `run()`, or a queued one — see [Agents](./agents.md#the-run-loop)).
 2. **`role: "assistant"`** — the model's reply, streamed incrementally: zero or more `done: false` chunks each carrying the next slice of `content` as it arrives from the provider, followed by one final `done: true` chunk. `content` is delta text, not the accumulated total — append it yourself if you need the running message.
-   - If the model requested tool calls this turn, they only appear on that final `done: true` chunk, as a fully-assembled `toolCalls` array — **not** streamed incrementally. Every built-in provider accumulates tool-call argument deltas internally across the whole response and emits them once, complete, at the end.
+   - If the model requested tool calls this turn, each one is emitted individually, mid-stream, as soon as *that* call finishes generating — `toolCalls: [thatOneCall]` on a `done: false` chunk. See "Incremental tool-call chunks" below.
 3. **`role: "tool"`** — one chunk per dispatched tool call, `done: true`, with `content` set to the tool's result text and `toolCallId`/`toolName` identifying which call it answers. Emitted after the tool has actually finished executing (there is no streaming/progress signal for tool execution itself through this callback — see below for how to get that separately).
 
 A full run of "call one tool, then answer" therefore looks like:
@@ -26,11 +26,28 @@ A full run of "call one tool, then answer" therefore looks like:
 ```
 { role: "user", content: "<prompt>", done: true }
 { role: "assistant", content: "<partial>", done: false }   // repeated
-{ role: "assistant", content: "", done: true, toolCalls: [...] }
+{ role: "assistant", content: "", done: false, toolCalls: [{...}] }
+{ role: "assistant", content: "", done: true }
 { role: "tool", content: "<result>", done: true, toolCallId, toolName }
 { role: "assistant", content: "<partial>", done: false }   // repeated
 { role: "assistant", content: "", done: true }
 ```
+
+Note the final `done: true` chunk for the tool-call turn carries no `toolCalls` — every call this turn was already streamed individually by the time it arrives, so resending the full list would just be a duplicate. If you need the complete, aggregated list for a turn (e.g. you're driving `AIProvider.chat()` directly rather than going through `agent.run()`), it's on the returned `ChatResponse.toolCalls` instead — see below.
+
+## Incremental tool-call chunks
+
+Deciding *whether* to call a tool and building its arguments is itself something the model streams token by token — so as soon as one call's arguments are fully generated, that call is emitted on its own as `toolCalls: [thatOneCall]`, without waiting for the rest of the turn (more tool calls, or trailing text) to finish too. This is purely observational: it exists so a consumer can show "the model just decided to call `X`" the moment it happens.
+
+**It does not change when a tool actually runs.** Dispatch is still all-or-nothing at the end of the turn: `BaseAgent` only executes tool calls after `AIProvider.chat()` fully resolves and returns the complete `ChatResponse.toolCalls` array — nothing is ever called early just because its single-call chunk arrived first. If you want to reconcile the two: the incremental `toolCalls: [...]` chunks tell you a call was *decided*, in the order the model produced them; the eventual `role: "tool"` result chunks tell you a call was *executed*, in whatever order `BaseAgent` dispatches them.
+
+Detection differs by provider, since not every API has an explicit "this call is done" signal:
+
+| Provider | How completion is detected |
+|---|---|
+| Anthropic | Native `content_block_stop` event — exact and immediate. |
+| OpenAI / DeepSeek | Inferred: the API streams one call's arguments at a time with no end marker, so a call is treated as finished the instant the *next* call's first delta (carrying a fresh `id`) arrives, or the stream ends (for the last/only call). |
+| Ollama | Ollama sends each tool call already fully formed (not built up token by token), so it's emitted the moment it's seen — deduplicated in case the same call reappears in a later chunk. |
 
 ## Minimal consumer
 
@@ -49,8 +66,8 @@ agent.run("what is current time?", (chunk) => {
     process.stdout.write(chunk.content);
   }
 
-  if (chunk.done && chunk.role === "assistant" && chunk.toolCalls?.length) {
-    console.log(chunk.toolCalls);
+  if (chunk.toolCalls?.length) {
+    console.log("decided to call:", chunk.toolCalls[0]);
   }
   if (chunk.role === "tool") {
     console.log({ toolCallId: chunk.toolCallId, toolName: chunk.toolName });

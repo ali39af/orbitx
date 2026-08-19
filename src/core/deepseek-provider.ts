@@ -125,6 +125,22 @@ export class DeepSeekProvider extends AIProvider {
                 let inputTokens = 0;
                 let outputTokens = 0;
                 const toolCallChunks: Record<number, { id?: string; name?: string; arguments: string }> = {};
+                // See the identical comment in openai-provider.ts: DeepSeek's
+                // Chat-Completions-compatible stream has no explicit
+                // "this tool call is done" event, so completion is inferred
+                // from the next call's id starting to arrive (or the stream
+                // ending, for the last/only call).
+                const emittedIndices = new Set<number>();
+                let activeIndex: number | undefined;
+
+                const finalizeAndEmit = async (idx: number) => {
+                    if (emittedIndices.has(idx)) return;
+                    emittedIndices.add(idx);
+                    const tc = toolCallChunks[idx];
+                    let inputs: Record<string, any> = {};
+                    try { inputs = JSON.parse(tc.arguments || "{}"); } catch { inputs = {}; }
+                    await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [{ id: tc.id || "", name: tc.name || "", inputs }] });
+                };
 
                 for await (const chunk of stream) {
                     const delta = chunk.choices[0]?.delta as any;
@@ -145,10 +161,14 @@ export class DeepSeekProvider extends AIProvider {
                     if (delta?.tool_calls) {
                         for (const tc of delta.tool_calls) {
                             const idx = tc.index ?? 0;
+                            if (tc.id && activeIndex !== undefined && activeIndex !== idx) {
+                                await finalizeAndEmit(activeIndex);
+                            }
                             if (!toolCallChunks[idx]) toolCallChunks[idx] = { arguments: "" };
                             if (tc.id) toolCallChunks[idx].id = tc.id;
                             if (tc.function?.name) toolCallChunks[idx].name = tc.function.name;
                             if (tc.function?.arguments) toolCallChunks[idx].arguments += tc.function.arguments;
+                            activeIndex = idx;
                         }
                     }
 
@@ -156,6 +176,9 @@ export class DeepSeekProvider extends AIProvider {
                         inputTokens = chunk.usage.prompt_tokens || 0;
                         outputTokens = chunk.usage.completion_tokens || 0;
                     }
+                }
+                if (activeIndex !== undefined) {
+                    await finalizeAndEmit(activeIndex);
                 }
 
                 const toolCalls: ToolCallRequest[] | undefined = Object.keys(toolCallChunks).length > 0
@@ -166,7 +189,7 @@ export class DeepSeekProvider extends AIProvider {
                     })
                     : undefined;
 
-                await streamCallback({ role: "assistant", content: "", done: true, ...(toolCalls ? { toolCalls } : {}) });
+                await streamCallback({ role: "assistant", content: "", done: true });
 
                 return {
                     content: fullContent,

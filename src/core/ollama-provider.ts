@@ -133,6 +133,7 @@ export class OllamaProvider extends AIProvider {
                 let promptEvalCount = 0;
                 let evalCount = 0;
                 let toolCalls: ToolCallRequest[] | undefined;
+                const emittedToolCallIds = new Set<string>();
 
                 for await (const chunk of stream) {
                     const content = chunk.message?.content || "";
@@ -150,7 +151,17 @@ export class OllamaProvider extends AIProvider {
                     }
 
                     if (chunk.message?.tool_calls?.length) {
+                        // Unlike OpenAI/DeepSeek/Anthropic, Ollama doesn't
+                        // stream a tool call's arguments incrementally — each
+                        // one arrives already fully formed, so it can be
+                        // emitted the moment it's seen instead of waiting
+                        // for the response to finish.
                         toolCalls = fromOllamaToolCalls(chunk.message.tool_calls as any);
+                        for (const toolCall of toolCalls ?? []) {
+                            if (emittedToolCallIds.has(toolCall.id)) continue;
+                            emittedToolCallIds.add(toolCall.id);
+                            await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [toolCall] });
+                        }
                     }
 
                     if (chunk.prompt_eval_count !== undefined) {
@@ -161,7 +172,7 @@ export class OllamaProvider extends AIProvider {
                     }
                 }
 
-                await streamCallback({ role: "assistant", content: "", done: true, ...(toolCalls ? { toolCalls } : {}) });
+                await streamCallback({ role: "assistant", content: "", done: true });
                 return {
                     content: fullContent,
                     inputTokens: promptEvalCount,

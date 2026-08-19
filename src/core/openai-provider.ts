@@ -150,6 +150,25 @@ export class OpenAIProvider extends AIProvider {
                 let inputTokens = 0;
                 let outputTokens = 0;
                 const toolCallChunks: Record<number, { id?: string; name?: string; arguments: string }> = {};
+                // OpenAI streams tool calls sequentially, one index at a
+                // time, with no explicit "this call is done" event — the
+                // only signal is the next call's first delta (carrying a
+                // fresh `id`) starting to arrive. So: whenever a new index
+                // shows up, the previously-active one must be finished;
+                // finalize and emit it then. The very last call in the
+                // response has no "next" index to trigger on, so it's
+                // finalized after the loop ends instead.
+                const emittedIndices = new Set<number>();
+                let activeIndex: number | undefined;
+
+                const finalizeAndEmit = async (idx: number) => {
+                    if (emittedIndices.has(idx)) return;
+                    emittedIndices.add(idx);
+                    const tc = toolCallChunks[idx];
+                    let inputs: Record<string, any> = {};
+                    try { inputs = JSON.parse(tc.arguments || "{}"); } catch { inputs = {}; }
+                    await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [{ id: tc.id || "", name: tc.name || "", inputs }] });
+                };
 
                 for await (const chunk of stream) {
                     const delta = chunk.choices[0]?.delta as any;
@@ -162,10 +181,14 @@ export class OpenAIProvider extends AIProvider {
                     if (delta?.tool_calls) {
                         for (const tc of delta.tool_calls) {
                             const idx = tc.index ?? 0;
+                            if (tc.id && activeIndex !== undefined && activeIndex !== idx) {
+                                await finalizeAndEmit(activeIndex);
+                            }
                             if (!toolCallChunks[idx]) toolCallChunks[idx] = { arguments: "" };
                             if (tc.id) toolCallChunks[idx].id = tc.id;
                             if (tc.function?.name) toolCallChunks[idx].name = tc.function.name;
                             if (tc.function?.arguments) toolCallChunks[idx].arguments += tc.function.arguments;
+                            activeIndex = idx;
                         }
                     }
 
@@ -173,6 +196,9 @@ export class OpenAIProvider extends AIProvider {
                         inputTokens = chunk.usage.prompt_tokens || 0;
                         outputTokens = chunk.usage.completion_tokens || 0;
                     }
+                }
+                if (activeIndex !== undefined) {
+                    await finalizeAndEmit(activeIndex);
                 }
 
                 const toolCalls: ToolCallRequest[] | undefined = Object.keys(toolCallChunks).length > 0
@@ -183,7 +209,7 @@ export class OpenAIProvider extends AIProvider {
                     })
                     : undefined;
 
-                await streamCallback({ role: "assistant", content: "", done: true, ...(toolCalls ? { toolCalls } : {}) });
+                await streamCallback({ role: "assistant", content: "", done: true });
 
                 return {
                     content: fullContent,

@@ -68,7 +68,19 @@ export type StreamCallback = (chunk: {
     role: "assistant" | "tool" | "user";
     content: string;
     done: boolean;
-    /** Present on the final ("done") assistant chunk when the model requested native tool calls this turn. */
+    /**
+     * A tool call the model requested this turn. Emitted incrementally, as
+     * a single-element array, the moment *that one call* finishes
+     * generating — mid-stream, before the rest of the turn (more tool
+     * calls, or trailing text) has necessarily finished. Purely
+     * observational: it lets a consumer show "the model decided to call X"
+     * as it happens. It does not affect when the call is actually
+     * dispatched — `BaseAgent` still waits for the whole turn to finish and
+     * dispatches from `ChatResponse.toolCalls` (the full, aggregated list),
+     * regardless of what streamed through here. Not resent on the final
+     * `done: true` chunk — every call was already streamed individually by
+     * the time that chunk arrives, so it would just be a duplicate.
+     */
     toolCalls?: ToolCallRequest[];
     /** Present on "tool"-role chunks — the id of the native tool call this result answers. */
     toolCallId?: string;

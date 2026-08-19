@@ -232,6 +232,16 @@ export class AnthropicProvider extends AIProvider {
                         }
                     }
 
+                    // A tool_use block is fully formed the moment Anthropic
+                    // closes it — unlike OpenAI/DeepSeek there's no need to
+                    // infer completion from the next block starting.
+                    if (event.type === "content_block_stop" && toolBlocks[event.index]) {
+                        const tb = toolBlocks[event.index];
+                        let inputs: Record<string, any> = {};
+                        try { inputs = JSON.parse(tb.inputJson || "{}"); } catch { inputs = {}; }
+                        await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [{ id: tb.id || "", name: tb.name || "", inputs }] });
+                    }
+
                     if (event.type === "message_start") {
                         inputTokens = event.message?.usage?.input_tokens || 0;
                     }
@@ -254,7 +264,7 @@ export class AnthropicProvider extends AIProvider {
                 const providerThinking = Object.keys(thinkingBlocks).length > 0 ? Object.values(thinkingBlocks) : undefined;
                 const thinkingText = providerThinking?.map(b => b.thinking).join("");
 
-                await streamCallback({ role: "assistant", content: "", done: true, ...(toolCalls ? { toolCalls } : {}) });
+                await streamCallback({ role: "assistant", content: "", done: true });
 
                 return {
                     content: fullContent,

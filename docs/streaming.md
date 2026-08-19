@@ -42,7 +42,12 @@ agent.run("what is current time?", (chunk) => {
     process.stdout.write(`\n${chunk.role}: `);
     oldRole = chunk.role;
   }
-  process.stdout.write(chunk.content);
+
+  if (chunk.thinking) {
+    process.stdout.write(`\x1b[2m${chunk.thinking}\x1b[0m`); // dim, to visually separate it from the answer
+  } else {
+    process.stdout.write(chunk.content);
+  }
 
   if (chunk.done && chunk.role === "assistant" && chunk.toolCalls?.length) {
     console.log(chunk.toolCalls);
@@ -78,6 +83,13 @@ Support varies by provider — set `thinkEffort` and check `getCapabilities().su
 | DeepSeek | Yes — `delta.reasoning_content` on reasoner models. |
 | Ollama | Yes — `message.thinking` on models that support it. |
 | OpenAI | **No.** `thinkEffort` is still honored server-side (via `reasoning_effort`) on reasoning-capable models, but the Chat Completions API this provider uses never returns the reasoning text itself — there's nothing to stream. |
+
+### `thinking` vs `providerThinking` on `Message`/`ChatResponse`
+
+Once a turn finishes, its accumulated reasoning is available two ways on both `ChatResponse` (returned from `AIProvider.chat()`) and `Message` (as stored in an agent's history):
+
+- **`thinking?: string`** — the plain reasoning text, for display or logging. Never required by any provider's API; read-only from your side.
+- **`providerThinking?: any[]`** — opaque, provider-specific data (currently only Anthropic populates this: signed `thinking` content blocks). When a turn both thinks and calls a tool, Anthropic's API requires the exact signed thinking block(s) from that turn to be replayed verbatim on the next request or it rejects the call. `BaseAgent` carries this field through automatically when it builds the next turn's message history, so if you're using `BaseAgent`/`SimpleAgent` you never touch it directly. It only matters if you're driving an `AIProvider` yourself (see [Providers](./providers.md)) — in that case, copy `providerThinking` from the response straight onto the `Message` you push for that assistant turn, unchanged.
 
 ## What's *not* in the stream today
 

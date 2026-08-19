@@ -123,6 +123,20 @@ Backs the `PlannerSkill` (see [Skills](./skills.md)), but usable standalone.
 | `GetCurrentTimeTool` | Get the current date/time (ISO string, unix timestamp, timezone). |
 | `DelayTool` | Wait a given number of milliseconds (max 60000ms) before continuing. |
 
+### Multi-agent — `AgentTools(availableAgents, options?)` *(experimental)*
+
+**Experimental** — see the note in [Agents](./agents.md#multi-agent-workeragent-experimental).
+
+Unlike every other domain above, this one takes parameters: a fixed roster of `WorkerAgent` instances (see [Agents](./agents.md#multi-agent-workeragent-experimental)) you build ahead of time, and an optional `{ maxHired?: number }` cap on how many can be hired at once. Give the result to your **planner** agent.
+
+| Tool | Purpose |
+|---|---|
+| `agent-list` | List every worker in the roster — name, description, rating, and hired status. Also returns `hiredCount` and (when set) `maxHired`. |
+| `agent-hire` | Hire a worker by name, making it eligible for `agent-prompt`. |
+| `agent-prompt` | Send a prompt to a hired worker and return its response once it's done. |
+
+`AgentReportTool` is a separate, standalone factory in the same module — put it on each **worker's own** tool list instead (not the planner's), so a worker can hand a result back and end its turn. See [Agents](./agents.md#agent-report--for-workers-not-the-planner) for the full walkthrough.
+
 ## Writing a custom tool
 
 ```ts

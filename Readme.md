@@ -250,6 +250,18 @@ Drives a real headless browser session.
 | `GetCurrentTimeTool` | Get the current date/time (ISO string, unix timestamp, timezone). |
 | `DelayTool` | Wait a given number of milliseconds (max 60000ms) before continuing. |
 
+### Multi-agent (`AgentTools`) — Experimental
+
+⚠️ This feature is new and still settling — names and behavior may change in a future release.
+
+Unlike the other domains, this one takes parameters — a roster of `WorkerAgent`s (a `BaseAgent` with a name/description/rating) you build ahead of time, and an optional hiring cap: `AgentTools([worker1, worker2, ...], { maxHired: 2 })`. Give the result to your planner agent so it can list, hire, and prompt those workers as sub-agents; give each worker its own `AgentReportTool()` so it can hand a result back and stop. Full walkthrough in the [docs](./docs/agents.md#multi-agent-workeragent-experimental).
+
+| Tool | Purpose |
+|---|---|
+| `agent-list` | List every worker in the roster — name, description, rating, hired status. |
+| `agent-hire` | Hire a worker by name, making it eligible for `agent-prompt`. |
+| `agent-prompt` | Send a prompt to a hired worker and return its response once it's done. |
+
 ## Available Skills
 
 A `Skill` bundles instructions with the tools that go with them. Passing a skill into an agent adds its tools automatically and folds its instructions into the system prompt.

@@ -18,6 +18,7 @@ Flat index of every public export from `orbitx` (see `src/index.ts`), grouped by
 
 - `BaseAgent`
 - `SimpleAgent`
+- `WorkerAgent` *(experimental)*, type `WorkerAgentRating`
 - Types: `ExtractedSegment`, `ParsedToolCall`
 
 ## Tools — see [Tools](./tools.md)
@@ -36,6 +37,7 @@ Built-in tool factories, grouped by domain (each domain also exports a `*Tools()
 | Present | `PresentAddTool`, `PresentClearTool`, `PresentGetListTool`, `PresentTools`, `getPresentFolder()`, `PresentInteraction`, type `PresentEvent` |
 | Question/Answer | `QuestionAnswerTool`, `QuestionAnswerTools`, `QuestionAnswerInteraction`, type `QuestionAnswerEvent` |
 | Utility | `GetCurrentTimeTool`, `DelayTool`, `UtilTools` |
+| Multi-agent *(experimental)* | `AgentTools(availableAgents, options?)`, `AgentListTool`, `AgentHireTool`, `AgentPromptTool`, `AgentReportTool`, `AgentRegistry`, `AgentInteraction`, type `AgentInfo`, type `AgentEvent`, type `AgentToolsOptions` — see [Agents](./agents.md#multi-agent-workeragent-experimental) |
 
 ## Skills — see [Skills](./skills.md)
 

@@ -29,6 +29,19 @@ export { MCPFilter } from "./core/mcp-filter.js";
 
 
 export { SimpleAgent } from "./templates/simple.js";
+export { WorkerAgent } from "./core/worker-agent.js";
+export type { WorkerAgentRating } from "./core/worker-agent.js";
+
+export {
+    AgentTools,
+    AgentListTool,
+    AgentHireTool,
+    AgentPromptTool,
+    AgentReportTool,
+    AgentRegistry,
+    AgentInteraction,
+} from "./tools/agent/index.js";
+export type { AgentInfo, AgentEvent, AgentToolsOptions } from "./tools/agent/index.js";
 
 export { GetCurrentTimeTool, DelayTool, UtilTools } from "./tools/utils/index.js";
 

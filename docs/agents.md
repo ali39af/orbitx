@@ -4,6 +4,7 @@
 
 - **`BaseAgent`** (`src/core/base-agent.ts`) is the real engine — the run loop, memory compaction, tool dispatch, token accounting. It requires you to bring your own `MCPClient` (and therefore your own `MCPServer`/connection), which is what gives you the choice of in-process, IPC, or WebSocket execution (see [MCP Architecture](./mcp-architecture.md)).
 - **`SimpleAgent`** (`src/templates/simple.ts`) is a thin subclass that wires up an in-process `MCPConnection` + `MCPServer` + `MCPClient` for you from a flat `tools`/`skills` list. Use this unless you specifically need a different transport.
+- **`WorkerAgent`** *(experimental)* (`src/core/worker-agent.ts`) is a `BaseAgent` with an identity — name, description, per-task-type rating — so another agent can list, compare, hire, and prompt it as a sub-agent. See [Multi-agent: WorkerAgent](#multi-agent-workeragent-experimental) below.
 
 ## `BaseAgent` constructor
 
@@ -80,3 +81,83 @@ Three read methods, all returning `{ total, inputHit, inputMiss, output }`:
 ## Instructions, skills, and memory in the system prompt
 
 The system prompt is built once (lazily, on first use) and never changes for the lifetime of an agent instance — a stable prefix, which matters for provider-side prompt caching. It's assembled from: a fixed "you have tools" preamble, each skill's name/description/instructions (see [Skills](./skills.md)), the current `MEMORY:` block, and your `instruction` string, in that order.
+
+## Multi-agent: `WorkerAgent` *(experimental)*
+
+**Experimental:** this whole feature (`WorkerAgent`, `AgentTools`, `AgentReportTool`) is new and still settling — names, the hire/prompt/report shape, and the fallback behavior when a worker never reports may change in a future release. Treat it as unstable if you're building something you don't want to have to revisit.
+
+`WorkerAgent` (`src/core/worker-agent.ts`) is a `BaseAgent` with three extra fields on top of the usual constructor options:
+
+```ts
+new WorkerAgent({
+  name: string;           // unique id used to hire/prompt this worker
+  description: string;    // persona/specialty, written for a hiring agent to judge fit from
+  rating?: Record<string, number>;  // per-task-type fit score, e.g. { backend: 9, "3d-web": 10 }, convention 0-10
+  // ...plus every BaseAgent option: instruction, allowedTools, aiProvider, mcpClient, skills?, maxMemorizeToken?, initData?
+});
+
+worker.getName();
+worker.getDescription();
+worker.getRating();
+```
+
+It's a raw building block, same as `BaseAgent` — you still bring your own `mcpClient`/`allowedTools` for it. The only thing `WorkerAgent` adds is identity metadata; running it (`.run()`, streaming, memory, tokens) is unchanged.
+
+### The `agent-*` tools
+
+`AgentTools(availableAgents: WorkerAgent[], options?: { maxHired?: number })` (from `src/tools/agent/`) builds a fixed roster of hireable workers into three planner-facing tools:
+
+| Tool | Purpose |
+|---|---|
+| `agent-list` | List every worker in the roster — name, description, rating, and whether it's currently hired. Also returns `hiredCount` and (when set) `maxHired`. |
+| `agent-hire` | Hire a worker by name, making it eligible for `agent-prompt`. Hiring an already-hired worker is a no-op. |
+| `agent-prompt` | Send a prompt to a hired worker and wait for its response. |
+
+`maxHired` caps how many workers can be hired at once — omit it for no limit. When set, it's woven directly into `agent-hire`'s own tool description (so the model learns the constraint from the tool itself, not out-of-band instructions) and exceeding it throws a clear error naming the current limit and who's currently hired. Re-hiring an already-hired worker is still a free no-op and never counts against the cap.
+
+Give these to your **planner** agent (the one that decides which workers to use), not to the workers themselves:
+
+```ts
+import { AgentTools, SimpleAgent, WorkerAgent, AnthropicProvider, AgentReportTool, MCPConnection, MCPServer, MCPClient } from "orbitx";
+
+function buildWorker(name: string, description: string, rating: Record<string, number>) {
+  const connection = new MCPConnection();
+  const server = new MCPServer(connection);
+  const reportTool = AgentReportTool();
+  server.registerTool(reportTool);
+  // ...register whatever other tools this worker needs on `server` too...
+
+  return new WorkerAgent({
+    name,
+    description,
+    rating,
+    instruction: `You are the ${name} specialist.`,
+    aiProvider: new AnthropicProvider("api-key", "claude-sonnet-5"),
+    mcpClient: new MCPClient(name, connection),
+    allowedTools: [reportTool /* , ...other tools registered above */],
+  });
+}
+
+const backendWorker = buildWorker("backend-worker", "Node.js APIs, databases, servers.", { backend: 9, frontend: 2 });
+const frontendWorker = buildWorker("frontend-worker", "React UI work.", { backend: 2, frontend: 9 });
+
+const planner = new SimpleAgent({
+  aiProvider: new AnthropicProvider("api-key", "claude-sonnet-5"),
+  instruction: "You coordinate work across specialist worker agents.",
+  // At most 1 hired at a time here, just as an example constraint.
+  tools: AgentTools([backendWorker, frontendWorker], { maxHired: 1 }),
+});
+```
+
+### `agent-report` — for workers, not the planner
+
+Include `AgentReportTool()` in each **worker's own** `allowedTools` (and register it on that worker's own `MCPServer`, as in the example above) — it's what lets a worker hand a result back once it's done. Calling it always ends the worker's current turn immediately (`stopIterationAfterUsingThisTool`), so a worker should call it and stop, not keep reasoning afterward.
+
+### How a prompt/report round-trip actually works
+
+1. Planner calls `agent-hire`, then `agent-prompt` with a task.
+2. `agent-prompt`'s implementation calls `workerAgent.run(prompt)` and waits for it to resolve — the worker runs its own full turn (its own reasoning, its own tools), completely independently of the planner's own loop.
+3. Once the worker's `run()` resolves, `agent-prompt` looks at only the messages that turn produced: if the worker called `agent-report`, that report text is returned (`{ report, reported: true }`); otherwise it falls back to the worker's last plain-text answer (`{ report, reported: false }`).
+4. The planner sees this as a normal tool result. It's the planner's call what happens next — prompt the same worker again to continue (its message history persists across `agent-prompt` calls, same as any agent's `run()`), or move on and never call it again if the report shows the work is done. Nothing about the worker's lifecycle is automatic.
+
+`AgentTools(...)` state (which agents are hired) is scoped to that one call — building a second, independent planner with its own `AgentTools([...])` call gets its own hire state, even in the same process.

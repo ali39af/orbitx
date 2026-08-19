@@ -28,6 +28,34 @@ interface ProviderCapabilities {
 
 `BaseAgent.run()` throws immediately if `getCapabilities().supportsTools` is `false` — the legacy JSON-in-text tool-call convention has been removed from the main loop. All providers default `supportsTools` to `true` except Ollama, which defaults it to `false` (many locally-hosted models don't support native function calling; pass `{ supportsTools: true }` explicitly if your model does).
 
+## Think effort
+
+Reasoning/thinking models each expose a different native "how hard should the model think" knob — OpenAI and Ollama use `low`/`medium`/`high`, DeepSeek uses `none`/`low`/`high`/`max`, Anthropic uses a numeric thinking-token budget. OrbitX replaces all of that with one universal option on every provider's constructor:
+
+```ts
+thinkEffort?: number;   // 0-1, e.g. 0.5 or 0.8 — never a provider-specific string
+```
+
+Each provider maps that 0-1 value onto whatever scale it actually accepts (`src/core/think-effort.ts`'s `resolveThinkEffortLevel()` buckets it evenly across a provider's supported levels; Anthropic instead scales it into a `budget_tokens` range). A provider or model that doesn't support thinking at all — or doesn't recognize the resulting native value — simply ignores it:
+
+```ts
+import { AnthropicProvider, DeepSeekProvider } from "orbitx";
+
+const anthropicProvider = new AnthropicProvider("api-key", "claude-sonnet-5", { thinkEffort: 0.7 });
+const deepseekProvider = new DeepSeekProvider("api-key", "deepseek-v4-flash", { thinkEffort: 0.3 });
+```
+
+Per-provider specifics:
+
+| Provider | Native scale | Notes |
+|---|---|---|
+| Anthropic | `thinking.budget_tokens` (numeric) | Scales with `maxTokens`; `max_tokens` sent to the API is automatically bumped so it always exceeds the thinking budget. Signed thinking blocks are carried forward automatically via `Message.providerThinking` when a thinking turn also made a tool call — required by Anthropic's API, handled for you. |
+| DeepSeek | `none` / `low` / `high` / `max` | Sent as `reasoning_effort` on reasoner models. |
+| OpenAI | `low` / `medium` / `high` | Sent as `reasoning_effort`, and **only** for reasoning-capable model families (`o1`/`o3`/`o4`/`gpt-5*` prefixes) — silently ignored for every other model, since the Chat Completions API rejects the param on non-reasoning models. |
+| Ollama | `false` / `low` / `medium` / `high` | `thinkEffort <= 0` maps to `false` (works as an on/off switch for models that only understand a boolean, e.g. deepseek-r1/qwen3); higher values map to a level string for models that support graded effort (e.g. gpt-oss). |
+
+See [Streaming](./streaming.md#thinking-chunks) for how (and whether) a given provider's reasoning text is observable while it streams.
+
 ## Built-in providers
 
 ### Ollama
@@ -38,6 +66,7 @@ import { OllamaProvider } from "orbitx";
 new OllamaProvider(model: string, host = "http://localhost:11434", options?: {
   supportsTools?: boolean;   // default false
   contextWindow?: number;    // default 32_000
+  thinkEffort?: number;      // 0-1, see "Think effort" above
 });
 ```
 
@@ -51,6 +80,7 @@ import { DeepSeekProvider } from "orbitx";
 new DeepSeekProvider(apiKey: string, model = "deepseek-v4-flash", options?: {
   supportsTools?: boolean;   // default true
   contextWindow?: number;    // default 1_000_000 (deepseek-v4-flash / deepseek-v4-pro)
+  thinkEffort?: number;      // 0-1, see "Think effort" above
 });
 ```
 
@@ -66,6 +96,7 @@ new AnthropicProvider(apiKey: string, model = "claude-sonnet-5", options?: {
   supportsImages?: boolean;   // default true
   contextWindow?: number;     // default from a per-model table, else 200_000
   maxTokens?: number;         // output token cap, default 4096
+  thinkEffort?: number;       // 0-1, see "Think effort" above
 });
 ```
 
@@ -81,6 +112,7 @@ new OpenAIProvider(apiKey: string, model = "gpt-5", options?: {
   supportsImages?: boolean;   // default true unless model is in a small denylist (e.g. o3-mini, o1-mini)
   contextWindow?: number;     // default from a per-model table, else 128_000
   baseURL?: string;           // point at an OpenAI-compatible endpoint
+  thinkEffort?: number;       // 0-1, see "Think effort" above — ignored on non-reasoning models
 });
 ```
 

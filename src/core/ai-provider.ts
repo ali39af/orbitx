@@ -40,6 +40,16 @@ export interface Message {
     toolCallId?: string;
     /** Present on tool-role messages responding to a native tool call — the tool name being answered. */
     toolName?: string;
+    /** Accumulated reasoning/thinking text the model produced before its final answer, when `thinkEffort` was set on the provider and it supports surfacing thinking (see `ProviderCapabilities.supportsThinking`). Informational only — not required to be resent to the provider. */
+    thinking?: string;
+    /**
+     * Opaque, provider-specific thinking content (e.g. Anthropic's signed
+     * `thinking` content blocks) that MUST be replayed verbatim on the next
+     * turn for providers that validate it — needed when an assistant turn
+     * mixed thinking with a native tool call. BaseAgent carries this through
+     * untouched; only the provider that produced it interprets it.
+     */
+    providerThinking?: any[];
 }
 
 export interface ChatResponse {
@@ -48,6 +58,10 @@ export interface ChatResponse {
     outputTokens: number;
     /** Native tool calls requested by the model, when the provider supports native tool-calling and tools were supplied. */
     toolCalls?: ToolCallRequest[];
+    /** Accumulated reasoning/thinking text produced this turn, when thinking was requested and the provider can surface it. See `Message.thinking`. */
+    thinking?: string;
+    /** Opaque provider-specific thinking content to carry forward — see `Message.providerThinking`. */
+    providerThinking?: any[];
 }
 
 export type StreamCallback = (chunk: {
@@ -60,6 +74,8 @@ export type StreamCallback = (chunk: {
     toolCallId?: string;
     /** Present on "tool"-role chunks — the name of the tool that was called. */
     toolName?: string;
+    /** Reasoning/thinking text delta for this chunk, mirroring `content` — present only while the model is thinking, absent (or empty) once it moves on to its actual answer. Only ever set on non-`done` assistant chunks. Never set unless the provider was configured with `thinkEffort` and can stream thinking (see `ProviderCapabilities.supportsThinking`); when a thinking chunk is emitted, `content` on that same chunk is empty. */
+    thinking?: string;
 }) => Promise<void> | void;
 
 /**
@@ -78,6 +94,8 @@ export interface ProviderCapabilities {
     contextWindow: number;
     /** Fraction of the context window (0-1) that's safe to fill before compacting; leaves headroom for the system prompt, tool schema, and the model's own output. Defaults applied by callers if not specified. */
     safeUsageRatio?: number;
+    /** Whether this provider can surface the model's reasoning/thinking text (streamed via the `thinking` chunk field, and returned as `ChatResponse.thinking`) when constructed with `thinkEffort`. A provider may still accept/honor `thinkEffort` server-side (e.g. it changes response quality/latency) while reporting `false` here, if its API never exposes the reasoning text itself. */
+    supportsThinking?: boolean;
 }
 
 export abstract class AIProvider {

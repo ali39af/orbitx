@@ -10,6 +10,7 @@ type StreamCallback = (chunk: {
   toolCalls?: ToolCallRequest[];  // only on the final ("done") assistant chunk, if the model called tools
   toolCallId?: string;            // on "tool"-role chunks
   toolName?: string;              // on "tool"-role chunks
+  thinking?: string;               // reasoning-text delta, mirroring `content` — see "Thinking chunks" below
 }) => Promise<void> | void;
 ```
 
@@ -57,9 +58,30 @@ agent.run("what is current time?", (chunk) => {
 });
 ```
 
+## Thinking chunks
+
+When a provider is constructed with `thinkEffort` (see [Providers](./providers.md#think-effort)) and it can actually surface reasoning text (`getCapabilities().supportsThinking`), that text streams incrementally too — as `role: "assistant"` chunks carrying their delta on `thinking` instead of `content`, interleaved *before* the model's normal answer chunks in the same turn:
+
+```
+{ role: "assistant", content: "", done: false, thinking: "<reasoning...>" }   // repeated
+{ role: "assistant", content: "<answer...>", done: false }                    // thinking absent from here on
+{ role: "assistant", content: "", done: true }
+```
+
+`thinking` mirrors `content`: a chunk carries text on exactly one of the two, never both, and `thinking` is only ever present on non-`done` chunks — the final `done: true` chunk never carries it. Once accumulated, the full reasoning text for the turn is also available non-streaming on `ChatResponse.thinking` / `Message.thinking` (e.g. for logging or persisting alongside the answer).
+
+Support varies by provider — set `thinkEffort` and check `getCapabilities().supportsThinking` before assuming thinking chunks will actually arrive:
+
+| Provider | Streams `thinking` chunks? |
+|---|---|
+| Anthropic | Yes — native `thinking_delta` events. |
+| DeepSeek | Yes — `delta.reasoning_content` on reasoner models. |
+| Ollama | Yes — `message.thinking` on models that support it. |
+| OpenAI | **No.** `thinkEffort` is still honored server-side (via `reasoning_effort`) on reasoning-capable models, but the Chat Completions API this provider uses never returns the reasoning text itself — there's nothing to stream. |
+
 ## What's *not* in the stream today
 
-- **No separate "thinking"/reasoning-token chunk type.** Only plain assistant `content` text is streamed; a reasoning model's thinking output is not currently surfaced through `StreamCallback` at all.
 - **No live per-tool progress channel through `StreamCallback`.** For domains that emit their own progress (browser navigation, long-running bash processes), subscribe to that domain's `*Interaction` `EventEmitter` directly instead (e.g. `BrowserInteraction`, `BashInteraction`) — see [Tools](./tools.md).
+- **Tool calls still only appear once, fully assembled** — see above. `thinkEffort`/thinking chunks don't change that.
 
 If your use case depends on either of these, check the project's issue tracker / recent changes before assuming they're unavailable — this area of the SDK is actively evolving.

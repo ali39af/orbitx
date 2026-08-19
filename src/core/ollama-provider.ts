@@ -3,8 +3,16 @@ import type { Message, ChatResponse, StreamCallback, ToolSchema, ToolCallRequest
 import AIProvider from "./ai-provider.js";
 import { toOpenAIFunctionTools } from "./tool-schema-translator.js";
 import { withRetry } from "./retry.js";
+import { resolveThinkEffortLevel, type ThinkEffortLevel } from "./think-effort.js";
 
 const DEFAULT_CONTEXT_WINDOW = 32_000;
+
+// Ollama's `think` option accepts a boolean (most thinking-capable models,
+// e.g. deepseek-r1/qwen3) or, for a smaller set of newer models (e.g.
+// gpt-oss), one of these three levels. thinkEffort === 0 maps to `false`
+// (thinking off) rather than the lowest level, so it still works as an
+// on/off switch for models that only understand booleans.
+const OLLAMA_THINK_LEVELS: readonly ThinkEffortLevel[] = ["low", "medium", "high"];
 
 function toOllamaMessages(messages: Message[], supportsTools: boolean): any[] {
     return messages.map(msg => {
@@ -65,13 +73,16 @@ export class OllamaProvider extends AIProvider {
     // the model card (most recent tool-capable families default to true).
     #supportsTools: boolean;
     #contextWindow: number;
+    /** Universal 0-1 thinking effort — see src/core/think-effort.ts. Mapped onto a boolean or OLLAMA_THINK_LEVELS in #chat; ignored by models that don't support thinking (Ollama itself ignores an unrecognized `think` value rather than erroring). */
+    #thinkEffort?: number;
 
-    constructor(model: string, host: string = "http://localhost:11434", options: { supportsTools?: boolean; contextWindow?: number } = {}) {
+    constructor(model: string, host: string = "http://localhost:11434", options: { supportsTools?: boolean; contextWindow?: number; thinkEffort?: number } = {}) {
         super();
         this.#client = new Ollama({ host });
         this.#model = model;
         this.#supportsTools = options.supportsTools ?? false;
         this.#contextWindow = options.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+        this.#thinkEffort = options.thinkEffort;
     }
 
     getCapabilities(): ProviderCapabilities {
@@ -80,6 +91,7 @@ export class OllamaProvider extends AIProvider {
             supportsImages: true,
             contextWindow: this.#contextWindow,
             safeUsageRatio: 0.5,
+            supportsThinking: true,
         };
     }
 
@@ -94,6 +106,14 @@ export class OllamaProvider extends AIProvider {
         const formattedTools = tools && tools.length > 0 && this.#supportsTools
             ? toOpenAIFunctionTools(tools)
             : undefined;
+        // OLLAMA_THINK_LEVELS only contains "low"/"medium"/"high", so this
+        // narrows to what Ollama's own `think` type actually accepts.
+        const think = this.#thinkEffort === undefined
+            ? undefined
+            : this.#thinkEffort <= 0
+                ? false
+                : resolveThinkEffortLevel(this.#thinkEffort, OLLAMA_THINK_LEVELS) as "low" | "medium" | "high";
+        const thinkParam = think !== undefined ? { think } : {};
 
         if (streamCallback) {
             return withRetry(async () => {
@@ -104,10 +124,12 @@ export class OllamaProvider extends AIProvider {
                     model: this.#model,
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
+                    ...thinkParam,
                     stream: true
                 });
 
                 let fullContent = "";
+                let fullThinking = "";
                 let promptEvalCount = 0;
                 let evalCount = 0;
                 let toolCalls: ToolCallRequest[] | undefined;
@@ -117,6 +139,14 @@ export class OllamaProvider extends AIProvider {
                     if (content) {
                         fullContent += content;
                         await streamCallback({ role: "assistant", content, done: false });
+                    }
+
+                    // Thinking-capable models stream reasoning text on
+                    // `message.thinking`, separately from `message.content`.
+                    const thinking = (chunk.message as any)?.thinking || "";
+                    if (thinking) {
+                        fullThinking += thinking;
+                        await streamCallback({ role: "assistant", content: "", done: false, thinking });
                     }
 
                     if (chunk.message?.tool_calls?.length) {
@@ -137,6 +167,7 @@ export class OllamaProvider extends AIProvider {
                     inputTokens: promptEvalCount,
                     outputTokens: evalCount,
                     ...(toolCalls ? { toolCalls } : {}),
+                    ...(fullThinking ? { thinking: fullThinking } : {}),
                 };
             });
         } else {
@@ -145,13 +176,17 @@ export class OllamaProvider extends AIProvider {
                     model: this.#model,
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
+                    ...thinkParam,
                 });
+
+                const thinking = (response.message as any)?.thinking;
 
                 return {
                     content: response.message?.content || "",
                     inputTokens: response.prompt_eval_count || 0,
                     outputTokens: response.eval_count || 0,
                     ...(fromOllamaToolCalls(response.message?.tool_calls as any) ? { toolCalls: fromOllamaToolCalls(response.message?.tool_calls as any) } : {}),
+                    ...(thinking ? { thinking } : {}),
                 };
             });
         }

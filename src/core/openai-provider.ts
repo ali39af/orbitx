@@ -3,6 +3,20 @@ import type { Message, ChatResponse, StreamCallback, ToolSchema, ToolCallRequest
 import AIProvider from "./ai-provider.js";
 import { toOpenAIFunctionTools } from "./tool-schema-translator.js";
 import { withRetry } from "./retry.js";
+import { resolveThinkEffortLevel, type ThinkEffortLevel } from "./think-effort.js";
+
+// Only OpenAI's reasoning-capable model families accept `reasoning_effort`
+// at all — sending it to a non-reasoning model errors, so `thinkEffort` is
+// silently ignored for anything outside this list. Chat Completions never
+// exposes the reasoning text itself (unlike DeepSeek/Anthropic/Ollama), so
+// there is no streamed `thinking` output for OpenAI even when this
+// param is honored server-side.
+const REASONING_MODEL_PREFIXES = ["o1", "o3", "o4", "gpt-5"];
+const OPENAI_THINK_LEVELS: readonly ThinkEffortLevel[] = ["low", "medium", "high"];
+
+function isReasoningModel(model: string): boolean {
+    return REASONING_MODEL_PREFIXES.some(prefix => model.startsWith(prefix));
+}
 
 const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
     "gpt-5": 400_000,
@@ -78,8 +92,10 @@ export class OpenAIProvider extends AIProvider {
     #supportsTools: boolean;
     #supportsImages: boolean;
     #contextWindow: number;
+    /** Universal 0-1 thinking effort — see src/core/think-effort.ts. Ignored unless the model is reasoning-capable (see isReasoningModel). */
+    #thinkEffort?: number;
 
-    constructor(apiKey: string, model: string = "gpt-5", options: { supportsTools?: boolean; supportsImages?: boolean; contextWindow?: number; baseURL?: string } = {}) {
+    constructor(apiKey: string, model: string = "gpt-5", options: { supportsTools?: boolean; supportsImages?: boolean; contextWindow?: number; baseURL?: string; thinkEffort?: number } = {}) {
         super();
         this.#client = new OpenAI({
             apiKey: apiKey,
@@ -89,6 +105,7 @@ export class OpenAIProvider extends AIProvider {
         this.#supportsTools = options.supportsTools ?? true;
         this.#supportsImages = options.supportsImages ?? !NO_IMAGE_MODELS.has(model);
         this.#contextWindow = options.contextWindow ?? MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
+        this.#thinkEffort = options.thinkEffort;
     }
 
     getCapabilities(): ProviderCapabilities {
@@ -97,6 +114,7 @@ export class OpenAIProvider extends AIProvider {
             supportsImages: this.#supportsImages,
             contextWindow: this.#contextWindow,
             safeUsageRatio: 0.5,
+            supportsThinking: false,
         };
     }
 
@@ -109,6 +127,10 @@ export class OpenAIProvider extends AIProvider {
         const formattedTools = tools && tools.length > 0 && this.#supportsTools
             ? toOpenAIFunctionTools(tools)
             : undefined;
+        const thinkLevel = isReasoningModel(this.#model)
+            ? resolveThinkEffortLevel(this.#thinkEffort, OPENAI_THINK_LEVELS)
+            : undefined;
+        const thinkParam = thinkLevel !== undefined ? { reasoning_effort: thinkLevel } : {};
 
         if (streamCallback) {
             return withRetry(async () => {
@@ -119,6 +141,7 @@ export class OpenAIProvider extends AIProvider {
                     model: this.#model,
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
+                    ...thinkParam,
                     stream: true,
                     stream_options: { include_usage: true },
                 });
@@ -175,6 +198,7 @@ export class OpenAIProvider extends AIProvider {
                     model: this.#model,
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
+                    ...thinkParam,
                 });
 
                 const message = response.choices[0]?.message;

@@ -1,5 +1,7 @@
 export { AIProvider } from "./core/ai-provider.js";
 export type { ChatResponse, Message, StreamCallback, ToolSchema, ToolCallRequest, MessageContentPart, ProviderCapabilities } from "./core/ai-provider.js";
+export { resolveThinkEffortLevel, clampThinkEffort } from "./core/think-effort.js";
+export type { ThinkEffortLevel } from "./core/think-effort.js";
 export { BaseAgent } from "./core/base-agent.js";
 export type { ExtractedSegment, ParsedToolCall } from "./core/base-agent.js";
 export { DeepSeekProvider } from "./core/deepseek-provider.js";

@@ -9,6 +9,8 @@ Flat index of every public export from `orbitx` (see `src/index.ts`), grouped by
 - `resolveAgentProviders()`
 - Types: `AgentProviderRole`, `AgentProviderEntry`, `AgentProvidersInput`, `ResolvedAgentProviders`
 - Types: `ChatResponse`, `Message`, `StreamCallback`, `ToolSchema`, `ToolCallRequest`, `MessageContentPart`, `ProviderCapabilities`
+- `resolveThinkEffortLevel()`, `clampThinkEffort()` — the universal 0-1 `thinkEffort` → provider-native-level mapping helpers; see [Providers](./providers.md#think-effort)
+- Type: `ThinkEffortLevel`
 - `ImageDescriber` — used internally by `BaseAgent` to describe image tool output via the `image` provider role; exported for direct use if you want to describe an image outside the agent loop.
 - `toOpenAIFunctionTools()` — translates a `ToolSchema[]` into OpenAI's function-calling format; exported for building custom providers.
 

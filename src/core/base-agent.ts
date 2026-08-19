@@ -365,9 +365,13 @@ Output only this JSON line, nothing else:
             
             firstIteration = false;
 
-            const assistantMessage: Message = chat.toolCalls?.length
-                ? { role: "assistant", content: chat.content, toolCalls: chat.toolCalls }
-                : { role: "assistant", content: chat.content };
+            const assistantMessage: Message = {
+                role: "assistant",
+                content: chat.content,
+                ...(chat.toolCalls?.length ? { toolCalls: chat.toolCalls } : {}),
+                ...(chat.thinking ? { thinking: chat.thinking } : {}),
+                ...(chat.providerThinking ? { providerThinking: chat.providerThinking } : {}),
+            };
             this.#messagesFull.push(assistantMessage);
             this.#messagesCompact.push(assistantMessage);
 

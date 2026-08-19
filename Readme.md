@@ -130,6 +130,18 @@ import { OpenAIProvider } from "orbitx";
 const openaiProvider = new OpenAIProvider("api-key", "gpt-5");
 ```
 
+### Think effort
+
+Every provider accepts a universal `thinkEffort` option (`0`-`1`, e.g. `0.5` or `0.8`) instead of a provider-specific string — each provider maps it onto whatever scale it actually accepts (DeepSeek's `none/low/high/max`, OpenAI/Ollama's `low/medium/high`, Anthropic's numeric thinking budget), and it's silently ignored by providers/models that don't support thinking at all:
+
+```ts
+import { AnthropicProvider } from "orbitx";
+
+const anthropicProvider = new AnthropicProvider("api-key", "claude-sonnet-5", { thinkEffort: 0.7 });
+```
+
+See the [docs](./docs/providers.md#think-effort) for the per-provider mapping and how thinking text streams (where supported).
+
 ### Two providers: main + image
 
 An agent uses exactly two provider roles — `main` (drives the agent loop itself) and `image` (describes image tool output, e.g. screenshots, so the main conversation doesn't have to carry raw image bytes). Pass a single provider to use it for both roles, or an array to split them:

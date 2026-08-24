@@ -6,7 +6,7 @@ import { resolvePath, toLines } from "./utils.js";
 export const FsEditFileTool = () => new MCPTool<FsInteraction>({
     name: "fs-edit-file",
     description:
-        "replace a specific line range in an existing file without rewriting the whole file. lines are 0-indexed; the range [offsetLine, offsetLine+limitLine) is replaced entirely by `content` (use limitLine 0 to insert at offsetLine without deleting anything). read the file first (fs-read-file) to get accurate line numbers, since another edit may have shifted them.",
+        "replace a specific line range in an existing file without rewriting the whole file. lines are 1-indexed (line 1 is the first line of the file, matching fs-read-file); the range [offsetLine, offsetLine+limitLine) 1-indexed lines is replaced entirely by `content` (use limitLine 0 to insert before offsetLine without deleting anything; use offsetLine totalLines+1 to append at end of file). read the file first (fs-read-file) to get accurate line numbers, since another edit may have shifted them.",
     inputs: [
         {
             name: "path",
@@ -17,7 +17,7 @@ export const FsEditFileTool = () => new MCPTool<FsInteraction>({
         {
             name: "offsetLine",
             type: "number",
-            description: "0-indexed line to start replacing from",
+            description: "1-indexed line to start replacing from (line 1 is the first line of the file)",
             required: true,
         },
         {
@@ -42,8 +42,8 @@ export const FsEditFileTool = () => new MCPTool<FsInteraction>({
     ): Promise<any> => {
         const { path, offsetLine, limitLine, content } = inputs;
 
-        if (typeof offsetLine !== "number" || offsetLine < 0) {
-            throw new Error("offsetLine must be a non-negative number");
+        if (typeof offsetLine !== "number" || offsetLine < 1) {
+            throw new Error("offsetLine is 1-indexed (line 1 is the first line of the file) and must be >= 1");
         }
         if (typeof limitLine !== "number" || limitLine < 0) {
             throw new Error("limitLine must be a non-negative number");
@@ -65,15 +65,16 @@ export const FsEditFileTool = () => new MCPTool<FsInteraction>({
         }
 
         const lines = toLines(raw);
+        const index = offsetLine - 1;
 
-        if (offsetLine > lines.length) {
-            throw new Error(`offsetLine ${offsetLine} is past end of file (${lines.length} lines)`);
+        if (index > lines.length) {
+            throw new Error(`offsetLine ${offsetLine} is past end of file (${lines.length} lines; use offsetLine ${lines.length + 1} to append)`);
         }
 
-        const removedCount = Math.min(limitLine, lines.length - offsetLine);
+        const removedCount = Math.min(limitLine, lines.length - index);
         const insertedLines = content.length === 0 ? [] : content.split(/\r\n|\r|\n/);
 
-        lines.splice(offsetLine, removedCount, ...insertedLines);
+        lines.splice(index, removedCount, ...insertedLines);
 
         await writeFile(fullPath, lines.join("\n"), { encoding: "utf-8" });
 

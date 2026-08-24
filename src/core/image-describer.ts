@@ -1,5 +1,12 @@
 import type { AIProvider, MessageContentPart } from "./ai-provider.js";
 
+/** Usage for one `describe()` call. */
+export interface ImageDescription {
+    description: string;
+    inputTokens: number;
+    outputTokens: number;
+}
+
 export class ImageDescriber {
     #provider: AIProvider;
 
@@ -12,7 +19,7 @@ export class ImageDescriber {
      * @param mimeType e.g. "image/png"
      * @param focusHint what the calling agent wants the description to pay attention to
      */
-    async describe(image: string, mimeType: string = "image/png", focusHint?: string): Promise<string> {
+    async describe(image: string, mimeType: string = "image/png", focusHint?: string): Promise<ImageDescription> {
         const caps = this.#provider.getCapabilities();
         if (!caps.supportsImages) {
             throw new Error(
@@ -35,7 +42,11 @@ export class ImageDescriber {
             { role: "user", parts },
         ]);
 
-        return response.content;
+        return {
+            description: response.content,
+            inputTokens: response.inputTokens,
+            outputTokens: response.outputTokens,
+        };
     }
 }
 

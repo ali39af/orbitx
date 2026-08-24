@@ -25,6 +25,22 @@ interface DispatchedToolResult {
     imagePart?: { image: string; mimeType?: string };
 }
 
+/** Built-in tool, always available alongside whatever MCP tools are allowed — lets the model trigger memory compaction itself instead of only having it happen as a hidden side-effect. */
+const COMPACT_MEMORY_TOOL_NAME = "compact_memory";
+
+const COMPACT_MEMORY_TOOL: ToolSchema = {
+    name: COMPACT_MEMORY_TOOL_NAME,
+    description: "Compact the conversation so far into a persistent memory note and reset the active working context. Nothing is lost — the summary is shown in every future system prompt's MEMORY section. Call this proactively when the conversation has grown long, or whenever asked to free up context.",
+    inputs: [
+        {
+            name: "new_memory",
+            type: "string",
+            description: "A compact summary capturing every important fact, decision, and pending task from the conversation so far. Replaces the current MEMORY note.",
+            required: true,
+        },
+    ],
+};
+
 export class BaseAgent {
     #maxMemorizeToken: number;
     #instruction: string = "";
@@ -51,6 +67,14 @@ export class BaseAgent {
     #currentInputHitTokens = 0;
     #currentLastOutputTokens = 0;
     #currentOutputTokens = 0;
+
+    // Usage from ImageDescriber calls (see #resolveToolOutputForModel) — tracked
+    // separately from the main loop's counters above since each call is a fresh,
+    // standalone chat with no history to replay, unlike the main loop. No hit/miss
+    // split here (unlike #currentInput*Tokens above) — there's nothing to have been
+    // cached from a prior turn, so every input token is a miss.
+    #imageInputMissTokens = 0;
+    #imageOutputTokens = 0;
 
     #stopSignal = false;
 
@@ -95,6 +119,9 @@ export class BaseAgent {
             currentInputMissTokens: number;
             currentInputHitTokens: number;
             currentOutputTokens: number;
+            /** Optional so snapshots taken before image-usage tracking existed still load — missing values default to 0. */
+            imageInputMissTokens?: number;
+            imageOutputTokens?: number;
         }
     }) {
         this.#instruction = instruction;
@@ -109,6 +136,8 @@ export class BaseAgent {
         this.#currentInputMissTokens = initData.currentInputMissTokens
         this.#currentInputHitTokens = initData.currentInputHitTokens
         this.#currentOutputTokens = initData.currentOutputTokens
+        this.#imageInputMissTokens = initData.imageInputMissTokens ?? 0;
+        this.#imageOutputTokens = initData.imageOutputTokens ?? 0;
         this.#allSkills = skills;
 
         const resolved = resolveAgentProviders(aiProvider);
@@ -124,63 +153,10 @@ export class BaseAgent {
         return Math.floor(caps.contextWindow * ratio);
     }
 
-    #extractJson(str: string): ExtractedSegment[] {
-        const segments: ExtractedSegment[] = [];
-        let textStart = 0;
-
-        for (let i = 0; i < str.length; i++) {
-            if (str[i] !== "{") continue;
-
-            let brace = 0;
-            for (let j = i; j < str.length; j++) {
-                if (str[j] === "{") brace++;
-                if (str[j] === "}") brace--;
-
-                if (brace === 0) {
-                    const candidate = str.slice(i, j + 1);
-                    try {
-                        const result = JSON.parse(candidate);
-                        if (
-                            result &&
-                            typeof result === "object" &&
-                            "tool" in result &&
-                            "inputs" in result &&
-                            typeof result.tool === "string"
-                        ) {
-                            const text = str.slice(textStart, i);
-                            if (text.trim().length > 0) {
-                                segments.push({ type: "text", context: text });
-                            }
-                            segments.push({ type: "tool", context: result as ParsedToolCall });
-
-                            i = j;
-                            textStart = j + 1;
-                        }
-                    } catch {
-                        // not valid JSON, skip
-                    }
-                    break;
-                }
-            }
-        }
-
-        const remaining = str.slice(textStart);
-        if (remaining.trim().length > 0) {
-            segments.push({ type: "text", context: remaining });
-        }
-
-        return segments;
-    }
-
-    async #extractToolCalls(content: string): Promise<ParsedToolCall[]> {
-        return this.#extractJson(content)
-            .filter((r): r is { type: "tool"; context: ParsedToolCall } => r.type === "tool")
-            .map((t) => t.context);
-    }
-
     async #getAllToolSchemas(): Promise<ToolSchema[]> {
-        return (await this.#mcpClient.getTools())
+        const mcpTools = (await this.#mcpClient.getTools())
             .filter(t => this.#allowedTools.map(t => t.getOptions().name).includes(t.name));
+        return [...mcpTools, COMPACT_MEMORY_TOOL];
     }
 
     #buildSkillsAndMemoryBlock(skills: Skill[]): string {
@@ -215,10 +191,23 @@ ${this.#buildSkillsAndMemoryBlock(skills)}`;
         return this.#systemPrompt;
     }
 
-    #buildMemoryPrompt(): string {
-        return `Summarize all important facts and pending tasks from this conversation.
-Output only this JSON line, nothing else:
-{"tool":"set_memory","inputs":{"new_memory":"<compact summary>"}}`;
+    /** Injected as a normal user turn once the running context crosses `#maxMemorizeToken`, so the model calls `compact_memory` itself on its next turn instead of the reset happening as a hidden side-effect. */
+    #buildForceCompactPrompt(): string {
+        return `You're nearing the safe context limit for this conversation. Before doing anything else, call the "${COMPACT_MEMORY_TOOL_NAME}" tool with a "new_memory" summary capturing every important fact, decision, and pending task so far.`;
+    }
+
+    /** Rolls the current (working) token counters into the lifetime totals, clears the working context, and stores the new running summary. Shared by voluntary and forced compaction — both go through the same `compact_memory` tool call. */
+    #compactMemory(newMemory: string): string {
+        this.#memory = newMemory;
+        this.#messagesCompact = [];
+        this.#fullInputHitTokens += this.#currentInputHitTokens;
+        this.#fullInputMissTokens += this.#currentInputMissTokens;
+        this.#fullOutputTokens += this.#currentOutputTokens;
+        this.#currentInputHitTokens = 0;
+        this.#currentInputMissTokens = 0;
+        this.#currentOutputTokens = 0;
+        this.#currentLastOutputTokens = 0;
+        return "Memory compacted. Continue where you left off, using MEMORY above for context.";
     }
 
     async #resolveToolOutputForModel(toolName: string, output: MCPToolOutput): Promise<{ text: string; imagePart?: { image: string; mimeType?: string } }> {
@@ -246,17 +235,20 @@ Output only this JSON line, nothing else:
         }
 
         const describer = new ImageDescriber(this.#imageProvider);
-        const description = await describer.describe(image, mimeType, focusHint);
-        return { text: JSON.stringify({ description, ...rest }) };
+        const result = await describer.describe(image, mimeType, focusHint);
+
+        this.#imageInputMissTokens += result.inputTokens;
+        this.#imageOutputTokens += result.outputTokens;
+
+        return { text: JSON.stringify({ description: result.description, ...rest }) };
     }
 
     async #dispatchTool(id: string, toolName: string, inputs: Record<string, any>): Promise<DispatchedToolResult> {
-        if (toolName === "set_memory") {
+        if (toolName === COMPACT_MEMORY_TOOL_NAME) {
             if (typeof inputs?.new_memory === "string") {
-                this.#memory = inputs.new_memory;
-                return { id, name: toolName, resultText: "Memory updated." };
+                return { id, name: toolName, resultText: this.#compactMemory(inputs.new_memory) };
             }
-            return { id, name: toolName, resultText: `Error: set_memory requires new_memory:string, got ${JSON.stringify(inputs)}` };
+            return { id, name: toolName, resultText: `Error: ${COMPACT_MEMORY_TOOL_NAME} requires new_memory:string, got ${JSON.stringify(inputs)}` };
         }
 
         if (!this.#allowedTools.map(t => t.getOptions().name).includes(toolName)) {
@@ -270,19 +262,6 @@ Output only this JSON line, nothing else:
         } catch (err: any) {
             return { id, name: toolName, resultText: `Error: ${err?.message ?? String(err)}` };
         }
-    }
-
-    /** Legacy-path dispatch: takes a ParsedToolCall (from #extractJson) and returns the JSON string historically pushed as a `system`-role message. */
-    async #dispatchLegacyTool(toolCall: ParsedToolCall): Promise<string> {
-        const result = await this.#dispatchTool(toolCall.id, toolCall.tool, toolCall.inputs);
-        if (toolCall.tool === "set_memory") {
-            return result.resultText;
-        }
-        return JSON.stringify({ id: result.id, output: this.#safeParse(result.resultText) });
-    }
-
-    #safeParse(text: string): any {
-        try { return JSON.parse(text); } catch { return text; }
     }
 
     async stop(): Promise<void> {
@@ -398,45 +377,19 @@ Output only this JSON line, nothing else:
                 await streamCallback?.({ role: "tool", content: result.resultText, done: true, toolCallId: result.id, toolName: result.name });
             }
 
-            let memorizeEventHappened = false;
+            const overMemoryBudget = this.#currentInputMissTokens + this.#currentLastOutputTokens > this.#maxMemorizeToken;
 
-            if (this.#currentInputMissTokens + this.#currentLastOutputTokens > this.#maxMemorizeToken) {
-                memorizeEventHappened = true;
-
-                const memChat = await this.#mainProvider.chat([
-                    { role: "system", content: systemPrompt },
-                    ...this.#messagesCompact,
-                    { role: "user", content: this.#buildMemoryPrompt() }
-                ]);
-
-                this.#currentInputHitTokens += this.#currentInputMissTokens;
-                this.#currentInputMissTokens += memChat.inputTokens - this.#currentInputMissTokens;
-                this.#currentOutputTokens += memChat.outputTokens;
-
-                for (const mc of await this.#extractToolCalls(memChat.content)) {
-                    const toolResponse = await this.#dispatchLegacyTool(mc);
-                    await streamCallback?.({ role: "tool", content: toolResponse, done: true, toolCallId: mc.id, toolName: mc.tool });
-                }
-
-                this.#messagesCompact = [];
-                this.#fullInputHitTokens += this.#currentInputHitTokens;
-                this.#fullInputMissTokens += this.#currentInputMissTokens;
-                this.#fullOutputTokens += this.#currentOutputTokens;
-                this.#currentInputHitTokens = 0;
-                this.#currentInputMissTokens = 0;
-                this.#currentOutputTokens = 0;
-                this.#currentLastOutputTokens = 0;
-            }
-
-            if (!calledAnyTool && memorizeEventHappened) {
-                prompt = "Continue where you left off, using MEMORY above for context.";
-                firstIteration = true;
+            if (overMemoryBudget) {
+                const forcePrompt: Message = { role: "user", content: this.#buildForceCompactPrompt() };
+                this.#messagesFull.push(forcePrompt);
+                this.#messagesCompact.push(forcePrompt);
+                await streamCallback?.({ role: "user", content: forcePrompt.content!, done: true });
             }
 
             const stopAfterToolCall = this.#allowedTools.filter(t => nativeCalls.map(nc => nc.name).includes(t.getOptions().name)).find(t => t.getOptions().stopIterationAfterUsingThisTool)
 
 
-            keepGoing = !stopAfterToolCall && calledAnyTool || memorizeEventHappened;
+            keepGoing = (!stopAfterToolCall && calledAnyTool) || overMemoryBudget;
         } while (keepGoing && this.#incomingRun.length == 0);
         if (this.#incomingRun.length > 1) {
             for (let i = 0; i < this.#incomingRun.length - 1; i++) {
@@ -464,14 +417,17 @@ Output only this JSON line, nothing else:
             currentInputMissTokens: this.#currentInputMissTokens,
             currentInputHitTokens: this.#currentInputHitTokens,
             currentOutputTokens: this.#currentOutputTokens,
+            imageInputMissTokens: this.#imageInputMissTokens,
+            imageOutputTokens: this.#imageOutputTokens,
         };
     }
+    /** Lifetime total across the main loop (current + all prior compacted segments) AND every ImageDescriber call this agent has made. */
     getTotalTokens() {
         return {
-            total: this.#currentInputHitTokens + this.#currentInputMissTokens + this.#currentOutputTokens + this.#fullInputHitTokens + this.#fullInputMissTokens + this.#fullOutputTokens,
+            total: this.#currentInputHitTokens + this.#currentInputMissTokens + this.#currentOutputTokens + this.#fullInputHitTokens + this.#fullInputMissTokens + this.#fullOutputTokens + this.#imageInputMissTokens + this.#imageOutputTokens,
             inputHit: this.#currentInputHitTokens + this.#fullInputHitTokens,
-            inputMiss: this.#currentInputMissTokens + this.#fullInputMissTokens,
-            output: this.#currentOutputTokens + this.#fullOutputTokens
+            inputMiss: this.#currentInputMissTokens + this.#fullInputMissTokens + this.#imageInputMissTokens,
+            output: this.#currentOutputTokens + this.#fullOutputTokens + this.#imageOutputTokens
         };
     }
 
@@ -481,6 +437,16 @@ Output only this JSON line, nothing else:
             inputHit: this.#currentInputHitTokens,
             inputMiss: this.#currentInputMissTokens,
             output: this.#currentOutputTokens
+        };
+    }
+
+    /** Usage from ImageDescriber calls only (see #resolveToolOutputForModel) — not included in getCurrentTotalTokens()/getFullTotalTokens() since it isn't part of the main loop's current/full split, but it IS folded into getTotalTokens()'s grand total. Each call is a fresh, standalone chat, so there's no hit/miss split to make — inputHit is always 0, every input token counts as inputMiss. */
+    getImageTotalTokens() {
+        return {
+            total: this.#imageInputMissTokens + this.#imageOutputTokens,
+            inputHit: 0,
+            inputMiss: this.#imageInputMissTokens,
+            output: this.#imageOutputTokens
         };
     }
 

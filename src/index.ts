@@ -18,6 +18,7 @@ export { OllamaProvider } from "./core/ollama-provider.js";
 export { Skill } from "./core/skill.js";
 export { MCPComputer } from "./core/mcp-computer.js";
 export { ImageDescriber } from "./core/image-describer.js";
+export type { ImageDescription } from "./core/image-describer.js";
 export { toOpenAIFunctionTools } from "./core/tool-schema-translator.js";
 export { resolveAgentProviders } from "./core/agent-providers.js";
 export type { AgentProviderRole, AgentProviderEntry, AgentProvidersInput, ResolvedAgentProviders } from "./core/agent-providers.js";
@@ -43,7 +44,7 @@ export {
 } from "./tools/agent/index.js";
 export type { AgentInfo, AgentEvent, AgentToolsOptions } from "./tools/agent/index.js";
 
-export { GetCurrentTimeTool, DelayTool, UtilTools } from "./tools/utils/index.js";
+export { GetCurrentTimeTool, DelayTool, ReadImageTool, UtilTools } from "./tools/utils/index.js";
 
 export {
     TodoCreateListTool,

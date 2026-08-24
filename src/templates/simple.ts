@@ -41,6 +41,8 @@ export class SimpleAgent extends BaseAgent {
             currentInputMissTokens: number;
             currentInputHitTokens: number;
             currentOutputTokens: number;
+            imageInputMissTokens?: number;
+            imageOutputTokens?: number;
         }
     }) {
         const conn = new MCPConnection();

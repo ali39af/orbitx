@@ -34,6 +34,8 @@ new MCPTool({
 
 Tools are registered on an `MCPServer` and invoked through an `MCPClient`; `SimpleAgent` does this wiring for you from a flat `tools` array.
 
+One tool schema the model sees isn't an `MCPTool` at all: `BaseAgent` always appends a built-in `compact_memory` tool to the schema list, handled internally rather than routed through the `MCPClient`. See [Memory compaction](./agents.md#memory-compaction).
+
 ## Built-in tool catalog
 
 Import a whole domain's tools at once (e.g. `FsTools()`), or import individual tools by name. Every domain also exports a `*Interaction` `EventEmitter` for subscribing to that domain's live progress events (e.g. `FsInteraction`, `BashInteraction`).
@@ -51,6 +53,8 @@ Import a whole domain's tools at once (e.g. `FsTools()`), or import individual t
 | `FsCreateDirTool` | Create a directory, including missing parents. |
 | `FsDeleteTool` | Permanently delete a file or directory (recursive optional). ⚠️ No undo. |
 | `FsMoveTool` | Move or rename a file or directory. |
+
+`FsReadFileTool` and `FsEditFileTool` both use **1-indexed** line numbers (line 1 is the first line of the file) for their `offsetLine` input — matching the convention most models already default to (`cat -n`, most editors). This is deliberate: a line number reported by `fs-read-file`'s `startLine`/`endLine` can be passed straight into `fs-edit-file`'s `offsetLine` without an off-by-one conversion. `limitLine` on both is a plain count, not a line number, so it isn't affected by the indexing.
 | `FsStatTool` | Check whether a path exists and get its metadata (type, size, modified time). |
 
 ### Bash / processes — `BashTools()`
@@ -122,6 +126,7 @@ Backs the `PlannerSkill` (see [Skills](./skills.md)), but usable standalone.
 |---|---|
 | `GetCurrentTimeTool` | Get the current date/time (ISO string, unix timestamp, timezone). |
 | `DelayTool` | Wait a given number of milliseconds (max 60000ms) before continuing. |
+| `ReadImageTool` | Read an image file off disk and hand it to the agent as an image tool-output — same handling as `BrowserScreenshotTool` (raw bytes to the model, or described by the image provider first, depending on config). |
 
 ### Multi-agent — `AgentTools(availableAgents, options?)` *(experimental)*
 

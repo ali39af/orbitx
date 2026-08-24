@@ -21,15 +21,22 @@ export function toLines(content: string): string[] {
  * Slices an array of lines by offset/limit, clamping to bounds, and returns
  * both the slice and the total line count so callers can page through large
  * files without ever loading the whole thing into a response.
+ *
+ * `offsetLine` is 1-indexed (the first line of the file is line 1), matching
+ * the convention every fs tool that talks about line numbers uses — this is
+ * what LLMs already expect from editors/`cat -n`, and keeping it consistent
+ * with `fs-edit-file`'s `offsetLine` is the whole point: a line number read
+ * here can be pasted straight into an edit call without an off-by-one.
+ * `startLine`/`endLine` in the result are 1-indexed and inclusive.
  */
 export function paginateLines(lines: string[], offsetLine: number, limitLine: number) {
     const totalLines = lines.length;
-    const start = Math.max(0, Math.min(offsetLine, totalLines));
+    const start = Math.max(0, Math.min(offsetLine - 1, totalLines));
     const end = Math.max(start, Math.min(start + limitLine, totalLines));
     return {
         content: lines.slice(start, end).join("\n"),
         totalLines,
-        startLine: start,
+        startLine: start + 1,
         endLine: end,
     };
 }

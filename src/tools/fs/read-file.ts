@@ -17,9 +17,9 @@ export const FsReadFileTool = () => new MCPTool<FsInteraction>({
         {
             name: "offsetLine",
             type: "number",
-            description: "line offset to start reading from",
+            description: "1-indexed line number to start reading from (line 1 is the first line of the file)",
             required: false,
-            default: 0,
+            default: 1,
         },
         {
             name: "limitLine",
@@ -36,7 +36,7 @@ export const FsReadFileTool = () => new MCPTool<FsInteraction>({
         _mcp?: MCP,
         customClass?: FsInteraction
     ): Promise<any> => {
-        const { path, offsetLine = 0, limitLine = 2000 } = inputs;
+        const { path, offsetLine = 1, limitLine = 2000 } = inputs;
 
         const fullPath = resolvePath(path);
 

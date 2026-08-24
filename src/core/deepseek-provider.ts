@@ -7,6 +7,7 @@ import { resolveThinkEffortLevel, type ThinkEffortLevel } from "./think-effort.j
 
 const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
     "deepseek-v4-flash": 1_000_000,
+    "deepseek-v4-flash-vision-exp": 1_000_000,
     "deepseek-v4-pro": 1_000_000,
 };
 const DEFAULT_CONTEXT_WINDOW = 1_000_000;
@@ -14,6 +15,8 @@ const DEFAULT_CONTEXT_WINDOW = 1_000_000;
 // DeepSeek's reasoning models accept `reasoning_effort` as one of these
 // four levels (OpenAI-compatible param, not in the `openai` SDK's types).
 const DEEPSEEK_THINK_LEVELS: readonly ThinkEffortLevel[] = ["none", "low", "high", "max"];
+
+const IMAGE_MODELS = new Set(["deepseek-v4-flash-vision-exp"]);
 
 function toOpenAIMessages(messages: Message[]): any[] {
     return messages.map(msg => {
@@ -69,11 +72,12 @@ export class DeepSeekProvider extends AIProvider {
     #client: OpenAI;
     #model: string;
     #supportsTools: boolean;
+    #supportsImages: boolean;
     #contextWindow: number;
     /** Universal 0-1 thinking effort — see src/core/think-effort.ts. Mapped onto DEEPSEEK_THINK_LEVELS in #chat. */
     #thinkEffort?: number;
 
-    constructor(apiKey: string, model: string = "deepseek-v4-flash", options: { supportsTools?: boolean; contextWindow?: number; thinkEffort?: number } = {}) {
+    constructor(apiKey: string, model: string = "deepseek-v4-flash", options: { supportsTools?: boolean; supportsImages?: boolean; contextWindow?: number; thinkEffort?: number } = {}) {
         super();
         this.#client = new OpenAI({
             apiKey: apiKey,
@@ -81,6 +85,7 @@ export class DeepSeekProvider extends AIProvider {
         });
         this.#model = model;
         this.#supportsTools = options.supportsTools ?? true;
+        this.#supportsImages = options.supportsImages ?? IMAGE_MODELS.has(model);
         this.#contextWindow = options.contextWindow ?? MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
         this.#thinkEffort = options.thinkEffort;
     }
@@ -88,7 +93,7 @@ export class DeepSeekProvider extends AIProvider {
     getCapabilities(): ProviderCapabilities {
         return {
             supportsTools: this.#supportsTools,
-            supportsImages: false,
+            supportsImages: this.#supportsImages,
             contextWindow: this.#contextWindow,
             safeUsageRatio: 0.5,
             supportsThinking: true,

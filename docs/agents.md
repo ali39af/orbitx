@@ -47,6 +47,15 @@ Each call to `run()`:
 
 If `run()` is called again while a previous call is still in flight, the new call is queued and resolves once the current run finishes (or times out after 4 minutes) — it does not run concurrently or interleave.
 
+### Calling `run()` again mid-flight: prompt coalescing, not truncation
+
+This is a deliberate design for absorbing multiple user prompts that arrive while the agent is still mid-turn (e.g. a chat UI where the user sends a couple of follow-up messages before the first reply lands) — not a bug, and nothing gets cut off mid-tool-call. The currently running loop iteration (one model turn plus all of that turn's tool dispatches) always finishes; only the *next* iteration is skipped once another `run()` call has queued:
+
+- **One call queues up:** the in-flight run finishes its current iteration and stops there; the queued call then runs its own fresh loop from scratch, in a context that already contains everything the first run produced (including any pending tool results).
+- **Multiple calls queue up:** every queued call except the last one has its prompt appended straight into history as a plain `role: "user"` message (with a matching stream chunk) and its own `run()` promise resolves immediately — no model turn is generated for that prompt specifically. The *last* queued call is the one that actually drives a real model turn, in a context that now includes every prompt that queued before it. The model's eventual reply addresses the whole accumulated batch at once, not each queued prompt individually.
+
+Practical implication: don't treat an early queued call's resolved `run()` promise as "the model has now answered this prompt" — for anything but the last queued call, it only means the prompt was recorded. Drive replies off `streamCallback` if you need to know when the model has actually responded.
+
 `stop()` requests the current run stop at the next safe point; it resolves once the loop has actually stopped, or rejects if it doesn't stop within 4 minutes.
 
 ### Native tool-calling is required
@@ -55,28 +64,37 @@ If `run()` is called again while a previous call is still in flight, the new cal
 
 ## Memory compaction
 
-OrbitX never truncates or deletes conversation history. Instead, `BaseAgent` tracks two token totals per run: `currentInputMissTokens` (uncached input) and `currentLastOutputTokens` (the last turn's output). When their sum exceeds `maxMemorizeToken`:
+OrbitX never truncates or deletes conversation history. Compaction happens through a real, always-available native tool — `compact_memory({ new_memory: string })` — that `BaseAgent` appends to every tool schema list alongside whatever MCP tools you allowed. This means the model can compact its own context whenever *it* judges the conversation has grown long, not only when forced to.
 
-1. The agent asks the main provider to summarize the conversation so far into a single JSON tool call (`{"tool":"set_memory","inputs":{"new_memory":"..."}}`), which becomes the running `memory` string injected into every future system prompt (`MEMORY:` section).
-2. `messagesCompact` — the *working* context sent to the provider each turn — is cleared.
-3. `messagesFull` — the complete, ever-appended history — is untouched, so nothing is lost; it's just no longer replayed to the model every turn.
-4. If no tool was called this turn (i.e. compaction happened on an otherwise-idle turn), the agent auto-continues with a synthetic "Continue where you left off, using MEMORY above for context." prompt so the model doesn't just stop mid-task.
+Calling `compact_memory`:
+
+1. Replaces the running `memory` string with `new_memory`, which is injected into every future system prompt (`MEMORY:` section).
+2. Clears `messagesCompact` — the *working* context sent to the provider each turn.
+3. Leaves `messagesFull` — the complete, ever-appended history — untouched, so nothing is lost; it's just no longer replayed to the model every turn.
+4. Rolls the current token counters into the lifetime totals (see [Token accounting](#token-accounting)) and resets them to zero.
+
+`BaseAgent` also tracks two token totals per run: `currentInputMissTokens` (uncached input) and `currentLastOutputTokens` (the last turn's output). When their sum exceeds `maxMemorizeToken`, the agent doesn't compact on the model's behalf — instead it appends a `role: "user"` message telling the model to call `compact_memory` before doing anything else, and loops back for another turn. This keeps compaction on the same native tool-call path the model already uses for everything else, rather than a hidden side-channel; a model that ignores the nudge (rare, since the instruction is explicit) will simply see it repeated on the next turn until it complies.
 
 `maxMemorizeToken`, if not passed explicitly, is derived as `contextWindow * safeUsageRatio` (default ratio `0.5`) from the main provider's `getCapabilities()` — so it scales automatically with whatever model you plug in.
 
 ## Persisting and resuming state
 
-`getCurrentAgentStates()` returns exactly the shape expected by the `initData` constructor option — `memory`, `messagesFull`, `messagesCompact`, and all six token counters. Serialize it (it's plain JSON) after any `run()` call, and pass it back into a fresh `BaseAgent`/`SimpleAgent` to resume — same conversation, same memory, same token history. See the example in [Getting Started](./getting-started.md#recovering-an-agents-state).
+`getCurrentAgentStates()` returns exactly the shape expected by the `initData` constructor option — `memory`, `messagesFull`, `messagesCompact`, the six main-loop token counters, and the two image-usage counters (`imageInputMissTokens`, `imageOutputTokens` — see [Token accounting](#token-accounting)). Serialize it (it's plain JSON) after any `run()` call, and pass it back into a fresh `BaseAgent`/`SimpleAgent` to resume — same conversation, same memory, same token history. See the example in [Getting Started](./getting-started.md#recovering-an-agents-state).
+
+The two image counters are optional on `initData` — a snapshot taken before image-usage tracking existed still loads, with both defaulting to `0`.
 
 ## Token accounting
 
-Three read methods, all returning `{ total, inputHit, inputMiss, output }`:
+Four read methods, all returning `{ total, inputHit, inputMiss, output }`:
 
-- `getCurrentTotalTokens()` — tokens used since the last memory compaction.
-- `getFullTotalTokens()` — tokens used across all *prior* compacted segments.
-- `getTotalTokens()` — the sum of both (lifetime total for this agent instance).
+- `getCurrentTotalTokens()` — main-loop tokens used since the last memory compaction.
+- `getFullTotalTokens()` — main-loop tokens used across all *prior* compacted segments.
+- `getImageTotalTokens()` — tokens used by every `ImageDescriber` call this agent has made (see [Providers](./providers.md#two-provider-roles-main--image)), tracked separately since a one-off image-description call has no conversation history to compact and so doesn't fit the current/full split.
+- `getTotalTokens()` — the sum of all three (lifetime total for this agent instance, main loop and image calls combined).
 
-`inputHit`/`inputMiss` track cached vs. uncached input tokens, since the compacted-context-replay pattern means most of a long conversation's prefix is a cache hit on providers that support prompt caching.
+`inputHit`/`inputMiss` on the main-loop methods track cached vs. uncached input tokens, since the compacted-context-replay pattern means most of a long conversation's prefix is a cache hit on providers that support prompt caching — this is a heuristic `BaseAgent` computes itself from the growing/reset conversation history: whatever was `inputMiss` last turn rolls into `inputHit` this turn, and `inputMiss` becomes this turn's raw input token count.
+
+`getImageTotalTokens()`'s `inputHit` is always `0` — each `ImageDescriber` call is a fresh, standalone chat with no prior turns to replay, so there's nothing for that heuristic to apply to. Every input token an image call reports counts as `inputMiss`.
 
 ## Instructions, skills, and memory in the system prompt
 

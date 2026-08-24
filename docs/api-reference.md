@@ -11,7 +11,7 @@ Flat index of every public export from `orbitx` (see `src/index.ts`), grouped by
 - Types: `ChatResponse`, `Message`, `StreamCallback`, `ToolSchema`, `ToolCallRequest`, `MessageContentPart`, `ProviderCapabilities`
 - `resolveThinkEffortLevel()`, `clampThinkEffort()` — the universal 0-1 `thinkEffort` → provider-native-level mapping helpers; see [Providers](./providers.md#think-effort)
 - Type: `ThinkEffortLevel`
-- `ImageDescriber` — used internally by `BaseAgent` to describe image tool output via the `image` provider role; exported for direct use if you want to describe an image outside the agent loop.
+- `ImageDescriber`, type `ImageDescription` — used internally by `BaseAgent` to describe image tool output via the `image` provider role; exported for direct use if you want to describe an image outside the agent loop. `describe()` returns an `ImageDescription` (`{ description, inputTokens, outputTokens }`), not a bare string.
 - `toOpenAIFunctionTools()` — translates a `ToolSchema[]` into OpenAI's function-calling format; exported for building custom providers.
 
 ## Agents — see [Agents](./agents.md)
@@ -36,7 +36,7 @@ Built-in tool factories, grouped by domain (each domain also exports a `*Tools()
 | Todo | `TodoCreateListTool`, `TodoRemoveListTool`, `TodoGetListsTool`, `TodoGetListTool`, `TodoCreateTaskTool`, `TodoRemoveTaskTool`, `TodoCheckTaskTool`, `TodoTools`, `TodoInteraction`, types `TodoTask`, `TodoList`, `TodoEvent` |
 | Present | `PresentAddTool`, `PresentClearTool`, `PresentGetListTool`, `PresentTools`, `getPresentFolder()`, `PresentInteraction`, type `PresentEvent` |
 | Question/Answer | `QuestionAnswerTool`, `QuestionAnswerTools`, `QuestionAnswerInteraction`, type `QuestionAnswerEvent` |
-| Utility | `GetCurrentTimeTool`, `DelayTool`, `UtilTools` |
+| Utility | `GetCurrentTimeTool`, `DelayTool`, `ReadImageTool`, `UtilTools` |
 | Multi-agent *(experimental)* | `AgentTools(availableAgents, options?)`, `AgentListTool`, `AgentHireTool`, `AgentPromptTool`, `AgentReportTool`, `AgentRegistry`, `AgentInteraction`, type `AgentInfo`, type `AgentEvent`, type `AgentToolsOptions` — see [Agents](./agents.md#multi-agent-workeragent-experimental) |
 
 ## Skills — see [Skills](./skills.md)

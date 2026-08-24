@@ -79,12 +79,15 @@ import { DeepSeekProvider } from "orbitx";
 
 new DeepSeekProvider(apiKey: string, model = "deepseek-v4-flash", options?: {
   supportsTools?: boolean;   // default true
-  contextWindow?: number;    // default 1_000_000 (deepseek-v4-flash / deepseek-v4-pro)
+  supportsImages?: boolean;  // default: true only for deepseek-v4-flash-vision-exp
+  contextWindow?: number;    // default 1_000_000 (deepseek-v4-flash / deepseek-v4-flash-vision-exp / deepseek-v4-pro)
   thinkEffort?: number;      // 0-1, see "Think effort" above
 });
 ```
 
-Uses the `openai` SDK pointed at `https://api.deepseek.com` (DeepSeek's API is OpenAI-compatible). Always reports `supportsImages: false`.
+Uses the `openai` SDK pointed at `https://api.deepseek.com` (DeepSeek's API is OpenAI-compatible). `getCapabilities().supportsImages` is `false` for every model except `deepseek-v4-flash-vision-exp`, which is `deepseek-v4-flash` plus native image input (same context window, same reasoning support) — pass `supportsImages: true` explicitly if a future model adds vision support before this SDK's allowlist is updated.
+
+Token usage (`inputTokens`/`outputTokens`) is only accurate on the non-streaming path (`chat()` called without `streamCallback`), which reads `response.usage` directly. On the streaming path this provider deliberately does not set `stream_options: { include_usage: true }`, so DeepSeek never sends a usage-bearing chunk and both counts report as `0`. This matters most for `ImageDescriber`, which always calls `chat()` without a `streamCallback` (see [Token accounting](./agents.md#token-accounting)) — so image-description usage is captured correctly even though live agent streaming isn't.
 
 ### Anthropic
 

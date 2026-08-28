@@ -60,13 +60,25 @@ function truncate(str: string, cap: number): string {
 
 export async function createSession(url: string, sessionId: string): Promise<BrowserSession> {
     const browser = await puppeteer.launch({
-        executablePath: process.env.CHROME_PATH || (os.platform() == "win32" ?
+        executablePath: process.env.CHROME_PATH || (os.platform() === "win32" ?
             "C:/Program Files/Google/Chrome/Application/chrome.exe" :
             "/usr/bin/google-chrome-stable"),
-        headless: Boolean(process.env.HEADLESS_BROWSER_SESSIONS || true),
-        args: ["--no-sandbox"],
+        headless: process.env.HEADLESS_BROWSER_SESSIONS !== "false",
+        defaultViewport: { width: 1280, height: 800, deviceScaleFactor: 1 },
+        args: [
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-background-networking",
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-sync",
+            "--mute-audio",
+            "--no-first-run",
+            "--force-color-profile=srgb",
+            "--font-render-hinting=none",
+        ],
     });
-
     const page = await browser.newPage();
 
     const session = new BrowserSession(sessionId, browser, page);

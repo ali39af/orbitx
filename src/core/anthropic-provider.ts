@@ -155,7 +155,8 @@ export class AnthropicProvider extends AIProvider {
     async chat(
         messages: Message[],
         streamCallback?: StreamCallback,
-        tools?: ToolSchema[]
+        tools?: ToolSchema[],
+        signal?: AbortSignal
     ): Promise<ChatResponse> {
         const { system, messages: formattedMessages } = toAnthropicMessages(messages);
         const formattedTools = tools && tools.length > 0 && this.#supportsTools
@@ -185,7 +186,7 @@ export class AnthropicProvider extends AIProvider {
                     ...(formattedTools ? { tools: formattedTools } : {}),
                     ...thinkingParam,
                     stream: true,
-                });
+                }, { signal });
 
                 let fullContent = "";
                 let inputTokens = 0;
@@ -195,71 +196,83 @@ export class AnthropicProvider extends AIProvider {
                 // so the partial JSON has to be accumulated per block index
                 // the same way OpenAI's function-call arguments are.
                 const toolBlocks: Record<number, { id?: string; name?: string; inputJson: string }> = {};
+                // Only blocks that reached content_block_stop land here — if the stream is
+                // aborted mid-block (see the catch below), that block is still open in
+                // toolBlocks above but deliberately left out of the response: its JSON may be
+                // truncated mid-argument, and dispatching a tool call built from garbage input
+                // would be worse than just not surfacing it.
+                const finishedToolCalls: ToolCallRequest[] = [];
                 // Thinking blocks stream the same way: a start event, then
                 // incremental thinking_delta (text) and signature_delta
                 // (the cryptographic signature Anthropic requires replayed
                 // verbatim alongside a tool_use in the same turn).
                 const thinkingBlocks: Record<number, { type: "thinking"; thinking: string; signature: string }> = {};
 
-                for await (const event of stream as any) {
-                    if (event.type === "content_block_start") {
-                        if (event.content_block?.type === "tool_use") {
-                            toolBlocks[event.index] = {
-                                id: event.content_block.id,
-                                name: event.content_block.name,
-                                inputJson: "",
-                            };
+                try {
+                    for await (const event of stream as any) {
+                        if (event.type === "content_block_start") {
+                            if (event.content_block?.type === "tool_use") {
+                                toolBlocks[event.index] = {
+                                    id: event.content_block.id,
+                                    name: event.content_block.name,
+                                    inputJson: "",
+                                };
+                            }
+                            if (event.content_block?.type === "thinking") {
+                                thinkingBlocks[event.index] = { type: "thinking", thinking: "", signature: "" };
+                            }
                         }
-                        if (event.content_block?.type === "thinking") {
-                            thinkingBlocks[event.index] = { type: "thinking", thinking: "", signature: "" };
-                        }
-                    }
 
-                    if (event.type === "content_block_delta") {
-                        if (event.delta?.type === "text_delta" && event.delta.text) {
-                            fullContent += event.delta.text;
-                            await streamCallback({ role: "assistant", content: event.delta.text, done: false });
+                        if (event.type === "content_block_delta") {
+                            if (event.delta?.type === "text_delta" && event.delta.text) {
+                                fullContent += event.delta.text;
+                                await streamCallback({ role: "assistant", content: event.delta.text, done: false });
+                            }
+                            if (event.delta?.type === "input_json_delta" && toolBlocks[event.index]) {
+                                toolBlocks[event.index].inputJson += event.delta.partial_json || "";
+                            }
+                            if (event.delta?.type === "thinking_delta" && thinkingBlocks[event.index]) {
+                                thinkingBlocks[event.index].thinking += event.delta.thinking || "";
+                                await streamCallback({ role: "assistant", content: "", done: false, thinking: event.delta.thinking || "" });
+                            }
+                            if (event.delta?.type === "signature_delta" && thinkingBlocks[event.index]) {
+                                thinkingBlocks[event.index].signature += event.delta.signature || "";
+                            }
                         }
-                        if (event.delta?.type === "input_json_delta" && toolBlocks[event.index]) {
-                            toolBlocks[event.index].inputJson += event.delta.partial_json || "";
-                        }
-                        if (event.delta?.type === "thinking_delta" && thinkingBlocks[event.index]) {
-                            thinkingBlocks[event.index].thinking += event.delta.thinking || "";
-                            await streamCallback({ role: "assistant", content: "", done: false, thinking: event.delta.thinking || "" });
-                        }
-                        if (event.delta?.type === "signature_delta" && thinkingBlocks[event.index]) {
-                            thinkingBlocks[event.index].signature += event.delta.signature || "";
-                        }
-                    }
 
-                    // A tool_use block is fully formed the moment Anthropic
-                    // closes it — unlike OpenAI/DeepSeek there's no need to
-                    // infer completion from the next block starting.
-                    if (event.type === "content_block_stop" && toolBlocks[event.index]) {
-                        const tb = toolBlocks[event.index];
-                        let inputs: Record<string, any> = {};
-                        try { inputs = JSON.parse(tb.inputJson || "{}"); } catch { inputs = {}; }
-                        await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [{ id: tb.id || "", name: tb.name || "", inputs }] });
-                    }
+                        // A tool_use block is fully formed the moment Anthropic
+                        // closes it — unlike OpenAI/DeepSeek there's no need to
+                        // infer completion from the next block starting.
+                        if (event.type === "content_block_stop" && toolBlocks[event.index]) {
+                            const tb = toolBlocks[event.index];
+                            let inputs: Record<string, any> = {};
+                            try { inputs = JSON.parse(tb.inputJson || "{}"); } catch { inputs = {}; }
+                            const finished = { id: tb.id || "", name: tb.name || "", inputs };
+                            finishedToolCalls.push(finished);
+                            await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [finished] });
+                        }
 
-                    if (event.type === "message_start") {
-                        inputTokens = event.message?.usage?.input_tokens || 0;
-                    }
+                        if (event.type === "message_start") {
+                            inputTokens = event.message?.usage?.input_tokens || 0;
+                        }
 
-                    if (event.type === "message_delta") {
-                        if (event.usage?.output_tokens !== undefined) {
-                            outputTokens = event.usage.output_tokens;
+                        if (event.type === "message_delta") {
+                            if (event.usage?.output_tokens !== undefined) {
+                                outputTokens = event.usage.output_tokens;
+                            }
                         }
                     }
+                } catch (err) {
+                    // A signal we were handed ourselves (see immediateStop() in BaseAgent)
+                    // aborted the underlying request mid-stream. Treat this like a naturally
+                    // truncated turn rather than a failure: fall through and return whatever
+                    // text/tool-calls/tokens were accumulated above, instead of throwing away
+                    // content the caller already saw via streamCallback. A genuine network/API
+                    // error (signal not aborted) still propagates so withRetry can retry it.
+                    if (!signal?.aborted) throw err;
                 }
 
-                const toolCalls: ToolCallRequest[] | undefined = Object.keys(toolBlocks).length > 0
-                    ? Object.values(toolBlocks).map(tb => {
-                        let inputs: Record<string, any> = {};
-                        try { inputs = JSON.parse(tb.inputJson || "{}"); } catch { inputs = {}; }
-                        return { id: tb.id || "", name: tb.name || "", inputs };
-                    })
-                    : undefined;
+                const toolCalls: ToolCallRequest[] | undefined = finishedToolCalls.length > 0 ? finishedToolCalls : undefined;
 
                 const providerThinking = Object.keys(thinkingBlocks).length > 0 ? Object.values(thinkingBlocks) : undefined;
                 const thinkingText = providerThinking?.map(b => b.thinking).join("");
@@ -274,7 +287,7 @@ export class AnthropicProvider extends AIProvider {
                     ...(thinkingText ? { thinking: thinkingText } : {}),
                     ...(providerThinking ? { providerThinking } : {}),
                 };
-            });
+            }, signal);
         } else {
             return withRetry(async () => {
                 const response = await this.#client.messages.create({
@@ -284,7 +297,7 @@ export class AnthropicProvider extends AIProvider {
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
                     ...thinkingParam,
-                });
+                }, { signal });
 
                 const toolCalls = fromAnthropicToolCalls(response.content as any);
                 const { text: thinkingText, blocks: providerThinking } = thinkingFromAnthropicContent(response.content as any);
@@ -297,7 +310,7 @@ export class AnthropicProvider extends AIProvider {
                     ...(thinkingText ? { thinking: thinkingText } : {}),
                     ...(providerThinking ? { providerThinking } : {}),
                 };
-            });
+            }, signal);
         }
     }
 }

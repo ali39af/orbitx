@@ -21,14 +21,16 @@ function sleep(ms: number): Promise<void> {
  * a non-retryable marker instead (not needed currently, since all providers
  * here want to retry on any error: network errors, timeouts, 5xx, etc).
  */
-export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+export async function withRetry<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     let lastError: unknown;
 
     for (let attempt = 0; attempt <= BACKOFF_SCHEDULE_MS.length; attempt++) {
+        if (signal?.aborted) break;
         try {
             return await fn();
         } catch (err) {
             lastError = err;
+            if (signal?.aborted) break; // user cancellation — don't retry, don't wait
             const waitMs = BACKOFF_SCHEDULE_MS[attempt];
             if (waitMs === undefined) break; // no more retries left
             await sleep(waitMs);

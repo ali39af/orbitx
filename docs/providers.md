@@ -7,7 +7,8 @@ abstract class AIProvider {
   abstract chat(
     messages: Message[],
     streamCallback?: StreamCallback,
-    tools?: ToolSchema[]
+    tools?: ToolSchema[],
+    signal?: AbortSignal
   ): Promise<ChatResponse>;
 
   abstract getCapabilities(): ProviderCapabilities;
@@ -15,6 +16,9 @@ abstract class AIProvider {
 ```
 
 - `chat` sends the full message history (plus a provider-agnostic `tools` schema, when supplied) and returns a `ChatResponse` (`{ content, inputTokens, outputTokens, toolCalls? }`). If `streamCallback` is passed, text is streamed to it incrementally as it arrives — see [Streaming](./streaming.md).
+- `signal`, when passed and later aborted, cancels the in-flight request to the provider's API immediately rather than just abandoning it client-side — `BaseAgent.immediateStop()` uses this so the call stops generating (and billing for) further output right away. It doesn't retroactively waive input tokens or output already generated before the abort. Anthropic, OpenAI, and DeepSeek honor it for both streaming and non-streaming calls (their SDKs forward it straight to `fetch`). Ollama only honors it for streaming calls — its client has no way to abort a non-streaming request — so a `chat()` call made without a `streamCallback` against `OllamaProvider` can't be cancelled mid-flight; see the retry-loop guard in `ollama-provider.ts`.
+  - **Streaming calls resolve normally on abort**, returning a `ChatResponse` built from whatever content/thinking/tool-calls were accumulated before the cutoff, instead of throwing — so text already delivered via `streamCallback` still ends up recorded rather than discarded. A tool call still being generated when the abort lands is dropped (its arguments may be truncated JSON); only tool calls that had already fully finished streaming are included in `toolCalls`.
+  - **Non-streaming calls still throw on abort** — there's no partial response to salvage since the API only returns once, in full — and `BaseAgent` discards that turn.
 - `getCapabilities()` returns a static description used by `BaseAgent` to decide things like when to trigger memory compaction — it is **not** re-queried per call:
 
 ```ts

@@ -56,7 +56,13 @@ This is a deliberate design for absorbing multiple user prompts that arrive whil
 
 Practical implication: don't treat an early queued call's resolved `run()` promise as "the model has now answered this prompt" — for anything but the last queued call, it only means the prompt was recorded. Drive replies off `streamCallback` if you need to know when the model has actually responded.
 
-`stop()` requests the current run stop at the next safe point; it resolves once the loop has actually stopped, or rejects if it doesn't stop within 4 minutes.
+`safeStop()` requests the current run stop at the next safe point; it resolves once the loop has actually stopped, or rejects if it doesn't stop within 4 minutes. It does not interrupt an in-flight model call — that call is left to finish normally, and the loop stops right after.
+
+`immediateStop()` requests the same stop but returns right away without waiting for confirmation, **and** aborts the in-flight `chat()` call to the main provider immediately — the underlying HTTP request is cancelled rather than left to run to completion, so no further output tokens get generated (and billed) past that point. Input tokens, and any output already generated before the abort landed, are already committed — cancelling can't retroactively make those free. This is the one to reach for when a call has to be killed regardless of how far through it is (e.g. a credit balance that just went negative). A tool dispatch already in progress isn't aborted (tools have no generic cancellation hook) — the loop stops as soon as that call returns. Abort support is real for Anthropic, OpenAI, and DeepSeek (both streaming and non-streaming); for Ollama it only takes effect on streaming calls — see the note in `ollama-provider.ts`.
+
+For a **streaming** call, an abort doesn't throw the turn away: `chat()` resolves normally with whatever text, thinking, and tool calls were already accumulated before the cutoff — the same as if the model had naturally stopped there — so anything already sent to `streamCallback` still ends up recorded in message history instead of vanishing. A tool call the model was still in the middle of generating when the abort hit is dropped even then (its arguments may be truncated JSON); only tool calls that had already fully finished are included — e.g. if the model requested 3 tool calls and the abort landed while the 3rd was still streaming, only the first 2 come back. For a **non-streaming** call there's nothing to salvage (the API only returns a response once, in full) — abort there still surfaces as a thrown error, and `BaseAgent` discards that turn entirely rather than recording a broken one.
+
+`stop()` is a deprecated alias for `safeStop()` and will be removed in the 1.0.0 major release.
 
 ### Native tool-calling is required
 

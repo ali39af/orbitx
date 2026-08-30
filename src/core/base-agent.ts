@@ -1,4 +1,4 @@
-import type { AIProvider, Message, StreamCallback, ToolSchema, ToolCallRequest } from "./ai-provider.js";
+import type { AIProvider, Message, StreamCallback, ToolSchema, ToolCallRequest, ChatResponse } from "./ai-provider.js";
 import type MCPClient from "./mcp-client.js";
 import type MCPTool from "./mcp.js";
 import type Skill from "./skill.js";
@@ -77,6 +77,8 @@ export class BaseAgent {
     #imageOutputTokens = 0;
 
     #stopSignal = false;
+    /** Set for the duration of the in-flight `#mainProvider.chat()` call in the run loop below, and cleared right after — lets `immediateStop()` cancel that specific call without needing to know anything about the loop's internal state. */
+    #currentAbortController?: AbortController;
 
     #mcpClient: MCPClient;
 
@@ -265,6 +267,10 @@ ${this.#buildSkillsAndMemoryBlock(skills)}`;
     }
 
     async stop(): Promise<void> {
+        return this.safeStop();
+    }
+
+    async safeStop(): Promise<void> {
         this.#stopSignal = true;
         return new Promise((res, rej) => {
             let timeout: any = undefined;
@@ -281,6 +287,11 @@ ${this.#buildSkillsAndMemoryBlock(skills)}`;
                 rej(new Error("Unable to stop current agent execution flow!"));
             }, 240000);
         });
+    }
+
+    immediateStop(): void {
+        this.#stopSignal = true;
+        this.#currentAbortController?.abort();
     }
 
     async run(prompt: string, streamCallback?: StreamCallback): Promise<void> {
@@ -336,12 +347,25 @@ ${this.#buildSkillsAndMemoryBlock(skills)}`;
                 await streamCallback?.({ role: "user", content: prompt, done: true });
             }
 
-            const chat = await this.#mainProvider.chat([
-                { role: "system", content: systemPrompt },
-                ...this.#messagesCompact
-            ], streamCallback, allTools);
+            const abortController = new AbortController();
+            this.#currentAbortController = abortController;
 
-            
+            let chat: ChatResponse;
+            try {
+                chat = await this.#mainProvider.chat([
+                    { role: "system", content: systemPrompt },
+                    ...this.#messagesCompact
+                ], streamCallback, allTools, abortController.signal);
+            } catch (err) {
+                this.#currentAbortController = undefined;
+                if (abortController.signal.aborted) {
+                    this.#stopSignal = false;
+                    break;
+                }
+                throw err;
+            }
+            this.#currentAbortController = undefined;
+
             firstIteration = false;
 
             const assistantMessage: Message = {

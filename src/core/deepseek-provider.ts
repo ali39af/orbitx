@@ -103,7 +103,8 @@ export class DeepSeekProvider extends AIProvider {
     async chat(
         messages: Message[],
         streamCallback?: StreamCallback,
-        tools?: ToolSchema[]
+        tools?: ToolSchema[],
+        signal?: AbortSignal
     ): Promise<ChatResponse> {
         const formattedMessages = toOpenAIMessages(messages);
         const formattedTools = tools && tools.length > 0 && this.#supportsTools
@@ -123,7 +124,7 @@ export class DeepSeekProvider extends AIProvider {
                     ...(formattedTools ? { tools: formattedTools } : {}),
                     ...thinkParam,
                     stream: true
-                });
+                }, { signal });
 
                 let fullContent = "";
                 let fullThinking = "";
@@ -136,6 +137,7 @@ export class DeepSeekProvider extends AIProvider {
                 // from the next call's id starting to arrive (or the stream
                 // ending, for the last/only call).
                 const emittedIndices = new Set<number>();
+                const finalizedToolCalls: ToolCallRequest[] = [];
                 let activeIndex: number | undefined;
 
                 const finalizeAndEmit = async (idx: number) => {
@@ -144,55 +146,56 @@ export class DeepSeekProvider extends AIProvider {
                     const tc = toolCallChunks[idx];
                     let inputs: Record<string, any> = {};
                     try { inputs = JSON.parse(tc.arguments || "{}"); } catch { inputs = {}; }
-                    await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [{ id: tc.id || "", name: tc.name || "", inputs }] });
+                    const finished = { id: tc.id || "", name: tc.name || "", inputs };
+                    finalizedToolCalls.push(finished);
+                    await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [finished] });
                 };
 
-                for await (const chunk of stream) {
-                    const delta = chunk.choices[0]?.delta as any;
-                    const content = delta?.content || "";
-                    if (content) {
-                        fullContent += content;
-                        await streamCallback({ role: "assistant", content, done: false });
-                    }
+                try {
+                    for await (const chunk of stream) {
+                        const delta = chunk.choices[0]?.delta as any;
+                        const content = delta?.content || "";
+                        if (content) {
+                            fullContent += content;
+                            await streamCallback({ role: "assistant", content, done: false });
+                        }
 
-                    // DeepSeek's reasoner models stream reasoning text on
-                    // `delta.reasoning_content`, separately from `content`.
-                    const reasoning = delta?.reasoning_content || "";
-                    if (reasoning) {
-                        fullThinking += reasoning;
-                        await streamCallback({ role: "assistant", content: "", done: false, thinking: reasoning });
-                    }
+                        // DeepSeek's reasoner models stream reasoning text on
+                        // `delta.reasoning_content`, separately from `content`.
+                        const reasoning = delta?.reasoning_content || "";
+                        if (reasoning) {
+                            fullThinking += reasoning;
+                            await streamCallback({ role: "assistant", content: "", done: false, thinking: reasoning });
+                        }
 
-                    if (delta?.tool_calls) {
-                        for (const tc of delta.tool_calls) {
-                            const idx = tc.index ?? 0;
-                            if (tc.id && activeIndex !== undefined && activeIndex !== idx) {
-                                await finalizeAndEmit(activeIndex);
+                        if (delta?.tool_calls) {
+                            for (const tc of delta.tool_calls) {
+                                const idx = tc.index ?? 0;
+                                if (tc.id && activeIndex !== undefined && activeIndex !== idx) {
+                                    await finalizeAndEmit(activeIndex);
+                                }
+                                if (!toolCallChunks[idx]) toolCallChunks[idx] = { arguments: "" };
+                                if (tc.id) toolCallChunks[idx].id = tc.id;
+                                if (tc.function?.name) toolCallChunks[idx].name = tc.function.name;
+                                if (tc.function?.arguments) toolCallChunks[idx].arguments += tc.function.arguments;
+                                activeIndex = idx;
                             }
-                            if (!toolCallChunks[idx]) toolCallChunks[idx] = { arguments: "" };
-                            if (tc.id) toolCallChunks[idx].id = tc.id;
-                            if (tc.function?.name) toolCallChunks[idx].name = tc.function.name;
-                            if (tc.function?.arguments) toolCallChunks[idx].arguments += tc.function.arguments;
-                            activeIndex = idx;
+                        }
+
+                        if (chunk.usage) {
+                            inputTokens = chunk.usage.prompt_tokens || 0;
+                            outputTokens = chunk.usage.completion_tokens || 0;
                         }
                     }
-
-                    if (chunk.usage) {
-                        inputTokens = chunk.usage.prompt_tokens || 0;
-                        outputTokens = chunk.usage.completion_tokens || 0;
-                    }
+                } catch (err) {
+                    if (!signal?.aborted) throw err;
+                    activeIndex = undefined; // the stream cut off before we know this call finished — don't finalize it
                 }
                 if (activeIndex !== undefined) {
                     await finalizeAndEmit(activeIndex);
                 }
 
-                const toolCalls: ToolCallRequest[] | undefined = Object.keys(toolCallChunks).length > 0
-                    ? Object.values(toolCallChunks).map(tc => {
-                        let inputs: Record<string, any> = {};
-                        try { inputs = JSON.parse(tc.arguments || "{}"); } catch { inputs = {}; }
-                        return { id: tc.id || "", name: tc.name || "", inputs };
-                    })
-                    : undefined;
+                const toolCalls: ToolCallRequest[] | undefined = finalizedToolCalls.length > 0 ? finalizedToolCalls : undefined;
 
                 await streamCallback({ role: "assistant", content: "", done: true });
 
@@ -203,7 +206,7 @@ export class DeepSeekProvider extends AIProvider {
                     ...(toolCalls ? { toolCalls } : {}),
                     ...(fullThinking ? { thinking: fullThinking } : {}),
                 };
-            });
+            }, signal);
         } else {
             return withRetry(async () => {
                 const response = await this.#client.chat.completions.create({
@@ -211,7 +214,7 @@ export class DeepSeekProvider extends AIProvider {
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
                     ...thinkParam,
-                });
+                }, { signal });
 
                 const message = response.choices[0]?.message as any;
 
@@ -222,7 +225,7 @@ export class DeepSeekProvider extends AIProvider {
                     ...(fromOpenAIToolCalls(message?.tool_calls as any) ? { toolCalls: fromOpenAIToolCalls(message?.tool_calls as any) } : {}),
                     ...(message?.reasoning_content ? { thinking: message.reasoning_content } : {}),
                 };
-            });
+            }, signal);
         }
     }
 }

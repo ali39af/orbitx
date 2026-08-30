@@ -121,7 +121,8 @@ export class OpenAIProvider extends AIProvider {
     async chat(
         messages: Message[],
         streamCallback?: StreamCallback,
-        tools?: ToolSchema[]
+        tools?: ToolSchema[],
+        signal?: AbortSignal
     ): Promise<ChatResponse> {
         const formattedMessages = toOpenAIMessages(messages);
         const formattedTools = tools && tools.length > 0 && this.#supportsTools
@@ -144,7 +145,7 @@ export class OpenAIProvider extends AIProvider {
                     ...thinkParam,
                     stream: true,
                     stream_options: { include_usage: true },
-                });
+                }, { signal });
 
                 let fullContent = "";
                 let inputTokens = 0;
@@ -159,6 +160,7 @@ export class OpenAIProvider extends AIProvider {
                 // response has no "next" index to trigger on, so it's
                 // finalized after the loop ends instead.
                 const emittedIndices = new Set<number>();
+                const finalizedToolCalls: ToolCallRequest[] = [];
                 let activeIndex: number | undefined;
 
                 const finalizeAndEmit = async (idx: number) => {
@@ -167,47 +169,48 @@ export class OpenAIProvider extends AIProvider {
                     const tc = toolCallChunks[idx];
                     let inputs: Record<string, any> = {};
                     try { inputs = JSON.parse(tc.arguments || "{}"); } catch { inputs = {}; }
-                    await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [{ id: tc.id || "", name: tc.name || "", inputs }] });
+                    const finished = { id: tc.id || "", name: tc.name || "", inputs };
+                    finalizedToolCalls.push(finished);
+                    await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [finished] });
                 };
 
-                for await (const chunk of stream) {
-                    const delta = chunk.choices[0]?.delta as any;
-                    const content = delta?.content || "";
-                    if (content) {
-                        fullContent += content;
-                        await streamCallback({ role: "assistant", content, done: false });
-                    }
+                try {
+                    for await (const chunk of stream) {
+                        const delta = chunk.choices[0]?.delta as any;
+                        const content = delta?.content || "";
+                        if (content) {
+                            fullContent += content;
+                            await streamCallback({ role: "assistant", content, done: false });
+                        }
 
-                    if (delta?.tool_calls) {
-                        for (const tc of delta.tool_calls) {
-                            const idx = tc.index ?? 0;
-                            if (tc.id && activeIndex !== undefined && activeIndex !== idx) {
-                                await finalizeAndEmit(activeIndex);
+                        if (delta?.tool_calls) {
+                            for (const tc of delta.tool_calls) {
+                                const idx = tc.index ?? 0;
+                                if (tc.id && activeIndex !== undefined && activeIndex !== idx) {
+                                    await finalizeAndEmit(activeIndex);
+                                }
+                                if (!toolCallChunks[idx]) toolCallChunks[idx] = { arguments: "" };
+                                if (tc.id) toolCallChunks[idx].id = tc.id;
+                                if (tc.function?.name) toolCallChunks[idx].name = tc.function.name;
+                                if (tc.function?.arguments) toolCallChunks[idx].arguments += tc.function.arguments;
+                                activeIndex = idx;
                             }
-                            if (!toolCallChunks[idx]) toolCallChunks[idx] = { arguments: "" };
-                            if (tc.id) toolCallChunks[idx].id = tc.id;
-                            if (tc.function?.name) toolCallChunks[idx].name = tc.function.name;
-                            if (tc.function?.arguments) toolCallChunks[idx].arguments += tc.function.arguments;
-                            activeIndex = idx;
+                        }
+
+                        if (chunk.usage) {
+                            inputTokens = chunk.usage.prompt_tokens || 0;
+                            outputTokens = chunk.usage.completion_tokens || 0;
                         }
                     }
-
-                    if (chunk.usage) {
-                        inputTokens = chunk.usage.prompt_tokens || 0;
-                        outputTokens = chunk.usage.completion_tokens || 0;
-                    }
+                } catch (err) {
+                    if (!signal?.aborted) throw err;
+                    activeIndex = undefined; // the stream cut off before we know this call finished — don't finalize it
                 }
                 if (activeIndex !== undefined) {
                     await finalizeAndEmit(activeIndex);
                 }
 
-                const toolCalls: ToolCallRequest[] | undefined = Object.keys(toolCallChunks).length > 0
-                    ? Object.values(toolCallChunks).map(tc => {
-                        let inputs: Record<string, any> = {};
-                        try { inputs = JSON.parse(tc.arguments || "{}"); } catch { inputs = {}; }
-                        return { id: tc.id || "", name: tc.name || "", inputs };
-                    })
-                    : undefined;
+                const toolCalls: ToolCallRequest[] | undefined = finalizedToolCalls.length > 0 ? finalizedToolCalls : undefined;
 
                 await streamCallback({ role: "assistant", content: "", done: true });
 
@@ -217,7 +220,7 @@ export class OpenAIProvider extends AIProvider {
                     outputTokens,
                     ...(toolCalls ? { toolCalls } : {}),
                 };
-            });
+            }, signal);
         } else {
             return withRetry(async () => {
                 const response = await this.#client.chat.completions.create({
@@ -225,7 +228,7 @@ export class OpenAIProvider extends AIProvider {
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
                     ...thinkParam,
-                });
+                }, { signal });
 
                 const message = response.choices[0]?.message;
                 const toolCalls = fromOpenAIToolCalls(message?.tool_calls as any);
@@ -236,7 +239,7 @@ export class OpenAIProvider extends AIProvider {
                     outputTokens: response.usage?.completion_tokens || 0,
                     ...(toolCalls ? { toolCalls } : {}),
                 };
-            });
+            }, signal);
         }
     }
 }

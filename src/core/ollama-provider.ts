@@ -98,7 +98,8 @@ export class OllamaProvider extends AIProvider {
     async chat(
         messages: Message[],
         streamCallback?: StreamCallback,
-        tools?: ToolSchema[]
+        tools?: ToolSchema[],
+        signal?: AbortSignal
     ): Promise<ChatResponse> {
         const formattedMessages = toOllamaMessages(messages, this.#supportsTools);
         // Never send `tools` to a model we don't know supports it — Ollama
@@ -128,6 +129,10 @@ export class OllamaProvider extends AIProvider {
                     stream: true
                 });
 
+
+                const onAbort = () => stream.abort();
+                signal?.addEventListener("abort", onAbort, { once: true });
+
                 let fullContent = "";
                 let fullThinking = "";
                 let promptEvalCount = 0;
@@ -135,41 +140,47 @@ export class OllamaProvider extends AIProvider {
                 let toolCalls: ToolCallRequest[] | undefined;
                 const emittedToolCallIds = new Set<string>();
 
-                for await (const chunk of stream) {
-                    const content = chunk.message?.content || "";
-                    if (content) {
-                        fullContent += content;
-                        await streamCallback({ role: "assistant", content, done: false });
-                    }
+                try {
+                    for await (const chunk of stream) {
+                        const content = chunk.message?.content || "";
+                        if (content) {
+                            fullContent += content;
+                            await streamCallback({ role: "assistant", content, done: false });
+                        }
 
-                    // Thinking-capable models stream reasoning text on
-                    // `message.thinking`, separately from `message.content`.
-                    const thinking = (chunk.message as any)?.thinking || "";
-                    if (thinking) {
-                        fullThinking += thinking;
-                        await streamCallback({ role: "assistant", content: "", done: false, thinking });
-                    }
+                        // Thinking-capable models stream reasoning text on
+                        // `message.thinking`, separately from `message.content`.
+                        const thinking = (chunk.message as any)?.thinking || "";
+                        if (thinking) {
+                            fullThinking += thinking;
+                            await streamCallback({ role: "assistant", content: "", done: false, thinking });
+                        }
 
-                    if (chunk.message?.tool_calls?.length) {
-                        // Unlike OpenAI/DeepSeek/Anthropic, Ollama doesn't
-                        // stream a tool call's arguments incrementally — each
-                        // one arrives already fully formed, so it can be
-                        // emitted the moment it's seen instead of waiting
-                        // for the response to finish.
-                        toolCalls = fromOllamaToolCalls(chunk.message.tool_calls as any);
-                        for (const toolCall of toolCalls ?? []) {
-                            if (emittedToolCallIds.has(toolCall.id)) continue;
-                            emittedToolCallIds.add(toolCall.id);
-                            await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [toolCall] });
+                        if (chunk.message?.tool_calls?.length) {
+                            // Unlike OpenAI/DeepSeek/Anthropic, Ollama doesn't
+                            // stream a tool call's arguments incrementally — each
+                            // one arrives already fully formed, so it can be
+                            // emitted the moment it's seen instead of waiting
+                            // for the response to finish.
+                            toolCalls = fromOllamaToolCalls(chunk.message.tool_calls as any);
+                            for (const toolCall of toolCalls ?? []) {
+                                if (emittedToolCallIds.has(toolCall.id)) continue;
+                                emittedToolCallIds.add(toolCall.id);
+                                await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [toolCall] });
+                            }
+                        }
+
+                        if (chunk.prompt_eval_count !== undefined) {
+                            promptEvalCount = chunk.prompt_eval_count;
+                        }
+                        if (chunk.eval_count !== undefined) {
+                            evalCount = chunk.eval_count;
                         }
                     }
-
-                    if (chunk.prompt_eval_count !== undefined) {
-                        promptEvalCount = chunk.prompt_eval_count;
-                    }
-                    if (chunk.eval_count !== undefined) {
-                        evalCount = chunk.eval_count;
-                    }
+                } catch (err) {
+                    if (!signal?.aborted) throw err;
+                } finally {
+                    signal?.removeEventListener("abort", onAbort);
                 }
 
                 await streamCallback({ role: "assistant", content: "", done: true });
@@ -180,8 +191,9 @@ export class OllamaProvider extends AIProvider {
                     ...(toolCalls ? { toolCalls } : {}),
                     ...(fullThinking ? { thinking: fullThinking } : {}),
                 };
-            });
+            }, signal);
         } else {
+            if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
             return withRetry(async () => {
                 const response = await this.#client.chat({
                     model: this.#model,
@@ -199,7 +211,7 @@ export class OllamaProvider extends AIProvider {
                     ...(fromOllamaToolCalls(response.message?.tool_calls as any) ? { toolCalls: fromOllamaToolCalls(response.message?.tool_calls as any) } : {}),
                     ...(thinking ? { thinking } : {}),
                 };
-            });
+            }, signal);
         }
     }
 }

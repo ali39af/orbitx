@@ -111,10 +111,19 @@ export interface ProviderCapabilities {
 }
 
 export abstract class AIProvider {
+    /**
+     * @param signal When provided and later aborted, the in-flight request to the underlying
+     * provider API is cancelled immediately (not just abandoned client-side) — used by
+     * `BaseAgent.immediateStop()` to cut off a call's cost/token usage right away instead of
+     * waiting for it to finish. Providers built on fetch-based SDKs (Anthropic, OpenAI,
+     * DeepSeek) honor this for both streaming and non-streaming calls; Ollama's client only
+     * supports it for streaming calls (see ollama-provider.ts).
+     */
     abstract chat(
         messages: Message[],
         streamCallback?: StreamCallback,
-        tools?: ToolSchema[]
+        tools?: ToolSchema[],
+        signal?: AbortSignal
     ): Promise<ChatResponse>;
 
     /** Describe what this provider/model can do — used by BaseAgent to pick the native-tools vs. legacy-JSON path and to size the memory-compaction threshold. */

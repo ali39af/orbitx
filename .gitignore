@@ -54,7 +54,7 @@ tmp/
 temp/
 *.tmp
 
-# Runtime-generated data (MCPFSStorage default, presentable dir)
+# Runtime-generated data (present tool's default folder, presentable dir)
 data/
 presentable/
 

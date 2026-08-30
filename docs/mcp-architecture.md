@@ -86,7 +86,7 @@ Requires the `aliafsordeh/orbitx-sandbox:0.1` image (pull it, or build it yourse
 
 ## Storage and RNG
 
-- **`MCPStorage`** — abstract `{ get(key): Promise<string>; set(key, value): Promise<void> }`. `MCPFSStorage` is the default filesystem-backed implementation (`new MCPFSStorage(path?)`, defaults to a randomly-named folder under `./data`). `MCPStorage` and `MCPFSStorage` are both exported if you want to implement your own backend (Redis, a database, etc.) or point the default one at a specific path.
+- **`MCPStorage`** — abstract `{ get(key): Promise<string>; set(key, value): Promise<void> }`. `MCPFSStorage` is the default filesystem-backed implementation (`new MCPFSStorage(path?)`, defaults to a randomly-named folder under the OS temp directory). `MCPStorage` and `MCPFSStorage` are both exported if you want to implement your own backend (Redis, a database, etc.) or point the default one at a specific path.
 - **`MCPRNG`** — deterministic-ish id generator backed by an `MCPStorage` instance (used internally for things like `generateRefId()`, the helper behind ref ids in `BrowserReadTool`'s output).
 
 ## `MCPFilter` — redacting tool output

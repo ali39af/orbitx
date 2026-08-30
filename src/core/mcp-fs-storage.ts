@@ -1,12 +1,13 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 import { createHash } from "crypto";
 import MCPStorage from "./mcp-storage.js";
 
 export class MCPFSStorage extends MCPStorage {
 
     #fsStoragePath: string;
-    constructor(fsStoragePath = `./data/mcp-storage-${Math.round(Math.random() * 100000)}`) {
+    constructor(fsStoragePath = join(tmpdir(), `orbitx-mcp-storage-${Math.round(Math.random() * 100000)}`)) {
         super();
         this.#fsStoragePath = fsStoragePath;
         if (!existsSync(fsStoragePath))

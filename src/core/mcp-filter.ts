@@ -1,4 +1,4 @@
-export class MCPFilter {
+export class MCPOutputFilter {
     #values: (string | RegExp)[];
 
     constructor(values: (string | RegExp)[]) {
@@ -27,4 +27,9 @@ export class MCPFilter {
     }
 }
 
-export default MCPFilter;
+/** @deprecated Renamed to `MCPOutputFilter` — this alias will be removed in 1.0.0. */
+export const MCPFilter = MCPOutputFilter;
+/** @deprecated Renamed to `MCPOutputFilter` — this alias will be removed in 1.0.0. */
+export type MCPFilter = MCPOutputFilter;
+
+export default MCPOutputFilter;

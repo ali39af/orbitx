@@ -50,4 +50,5 @@ Built-in tool factories, grouped by domain (each domain also exports a `*Tools()
 - `MCPComputer` *(experimental)*
 - `MCPStorage`, `MCPFSStorage`
 - `MCPRNG`
-- `MCPFilter`
+- `MCPOutputFilter` (`MCPFilter` is a deprecated alias, removed in `1.0.0`)
+- `MCPExecutionPolicy`, `MCPBypassExecutionPolicy`, type `MCPToolCallRequest`

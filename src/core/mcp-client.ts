@@ -5,7 +5,8 @@ import { MCP, normalizeToolOutput } from "./mcp.js";
 import MCPRNG from "./mcp-rng.js";
 import type MCPStorage from "./mcp-storage.js";
 import MCPFSStorage from "./mcp-fs-storage.js";
-import MCPFilter from "./mcp-filter.js";
+import MCPOutputFilter from "./mcp-filter.js";
+import MCPExecutionPolicy, { MCPBypassExecutionPolicy } from "./mcp-execution-policy.js";
 import type { ProviderType } from "./ai-provider.js";
 
 type ExecuteProviderHandler = (toolCallId: string, type: ProviderType, input: Record<string, any>) => Promise<{ output: Record<string, any> }>;
@@ -15,21 +16,25 @@ export class MCPClient extends MCP {
     #storage;
     #rng;
     #mcpFilter;
+    #executionPolicy;
     #tools: MCPTool[] = [];
     #envID;
     #executeProviderHandler?: ExecuteProviderHandler;
 
-    constructor(envID: string, connection: MCPConnection | MCPConnection[], storage: MCPStorage = new MCPFSStorage(), rng?: MCPRNG, mcpFilter?: MCPFilter) {
+    constructor(envID: string, connection: MCPConnection | MCPConnection[], storage: MCPStorage = new MCPFSStorage(), rng?: MCPRNG, mcpFilter?: MCPOutputFilter, executionPolicy?: MCPExecutionPolicy) {
         super();
         this.#storage = storage;
         if (!rng)
             rng = new MCPRNG(storage);
         if (!mcpFilter)
-            mcpFilter = new MCPFilter([
-                // /\b(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.)\d{1,3}\.\d{1,3}\b/g // Prevent any local ip leakage by default you can pass empty MCPFilter to disable it
+            mcpFilter = new MCPOutputFilter([
+                // /\b(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.)\d{1,3}\.\d{1,3}\b/g // Prevent any local ip leakage by default you can pass empty MCPOutputFilter to disable it
                 // we add some default security roles after this feature become stable
             ]);
+        if (!executionPolicy)
+            executionPolicy = new MCPBypassExecutionPolicy();
         this.#mcpFilter = mcpFilter;
+        this.#executionPolicy = executionPolicy;
         this.#rng = rng;
         this.#connections = Array.isArray(connection) ? connection : [connection];
         this.#envID = envID;
@@ -118,6 +123,11 @@ export class MCPClient extends MCP {
     }
 
     async callTool(toolName: string, inputs: Record<string, any>, toolCallId?: string) {
+        const authorized = await this.#executionPolicy.authorize({ toolName, inputs, envID: this.#envID, toolCallId });
+        if (!authorized) {
+            throw new Error(`MCPExecutionPolicy denied tool call "${toolName}".`);
+        }
+
         const clientTool = this.#tools.find(t => t.getOptions().name == toolName);
         if (clientTool) {
             const raw = await clientTool.getOptions().execute(this.#envID, inputs, toolCallId, clientTool.getMCP());

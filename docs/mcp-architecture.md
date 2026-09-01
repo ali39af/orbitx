@@ -24,7 +24,7 @@ Registers tools and listens on its `connection` for incoming tool-call requests,
 ### `MCPClient`
 
 ```ts
-new MCPClient(envID: string, connection: MCPConnection | MCPConnection[], storage?: MCPStorage, rng?: MCPRNG, mcpFilter?: MCPFilter);
+new MCPClient(envID: string, connection: MCPConnection | MCPConnection[], storage?: MCPStorage, rng?: MCPRNG, mcpFilter?: MCPOutputFilter, executionPolicy?: MCPExecutionPolicy);
 mcpClient.getTools(): Promise<ToolSchema[]>;
 mcpClient.callTool(name: string, inputs: Record<string, any>, toolCallId?: string): Promise<MCPToolOutput>;
 mcpClient.setExecuteProviderHandler(handler: (toolCallId: string, type: ProviderType, input: Record<string, any>) => Promise<{ output: Record<string, any> }>): void;
@@ -34,7 +34,9 @@ mcpClient.setExecuteProviderHandler(handler: (toolCallId: string, type: Provider
 
 This is what you pass into `BaseAgent({ mcpClient, ... })`. `envID` scopes storage/RNG state per logical environment/session — pass a stable id (e.g. a user or conversation id) if you want isolated tool state per agent instance sharing a server. Accepting an array of connections lets one client fan out across multiple servers.
 
-`mcpFilter` (an `MCPFilter`) redacts sensitive substrings/patterns from tool output before it reaches the model — see [`MCPFilter`](#mcpfilter-redacting-tool-output) below.
+`mcpFilter` (an `MCPOutputFilter`) redacts sensitive substrings/patterns from tool output before it reaches the model — see [`MCPOutputFilter`](#mcpoutputfilter-redacting-tool-output) below.
+
+`executionPolicy` (an `MCPExecutionPolicy`) decides whether a tool call is allowed to run at all, *before* it's dispatched — see [`MCPExecutionPolicy`](#mcpexecutionpolicy-gating-tool-calls) below.
 
 #### Registering tools directly on the client (bypassing the connection)
 
@@ -92,14 +94,46 @@ Requires the `aliafsordeh/orbitx-sandbox:0.1` image (pull it, or build it yourse
 - **`MCPStorage`** — abstract `{ get(key): Promise<string>; set(key, value): Promise<void> }`. `MCPFSStorage` is the default filesystem-backed implementation (`new MCPFSStorage(path?)`, defaults to a randomly-named folder under the OS temp directory). `MCPStorage` and `MCPFSStorage` are both exported if you want to implement your own backend (Redis, a database, etc.) or point the default one at a specific path.
 - **`MCPRNG`** — deterministic-ish id generator backed by an `MCPStorage` instance (used internally for things like `generateRefId()`, the helper behind ref ids in `BrowserReadTool`'s output).
 
-## `MCPFilter` — redacting tool output
+## `MCPOutputFilter` — redacting tool output
 
 ```ts
-new MCPFilter(values: (string | RegExp)[]);
+new MCPOutputFilter(values: (string | RegExp)[]);
 mcpFilter.filter(input: any): any;   // replaces every match with "FILTERED_OUTPUT"
 ```
 
 Pass literal strings (e.g. an API key you never want echoed back to the model) or regexes (e.g. `/sk-[a-zA-Z0-9]{20,}/`) as the `mcpFilter` argument to `MCPClient` to scrub tool output before it's returned — useful when a tool might read a file or environment variable containing a secret.
+
+> `MCPOutputFilter` was named `MCPFilter` before. The old name is still exported as a deprecated alias (`export const MCPFilter = MCPOutputFilter`) and will be removed in `1.0.0` — switch to `MCPOutputFilter` in new code.
+
+## `MCPExecutionPolicy` — gating tool calls
+
+```ts
+abstract class MCPExecutionPolicy {
+    abstract authorize(request: MCPToolCallRequest): Promise<boolean> | boolean;
+}
+// MCPToolCallRequest = { toolName: string; inputs: Record<string, any>; envID: string; toolCallId?: string };
+```
+
+Checked by `MCPClient.callTool()` before every tool call is dispatched — whether the tool is registered locally on the client or routed across a connection to a remote `MCPServer`. Returning (or resolving to) `false` throws before the call reaches the tool, and that error surfaces to the model as a normal tool-error result (`BaseAgent`'s dispatch loop catches it the same way it catches any other `callTool()` rejection).
+
+`MCPClient` defaults to `MCPBypassExecutionPolicy`, a built-in no-op that authorizes every call — so this is entirely opt-in. Implement your own subclass of `MCPExecutionPolicy` to add an allowlist, rate limiting, per-tool confirmation, or any other trust policy, and pass it as the `executionPolicy` argument to `MCPClient`'s constructor:
+
+```ts
+import { MCPClient, MCPExecutionPolicy, type MCPToolCallRequest } from "orbitx";
+
+class AllowlistPolicy extends MCPExecutionPolicy {
+    #allowed: Set<string>;
+    constructor(allowed: string[]) {
+        super();
+        this.#allowed = new Set(allowed);
+    }
+    authorize({ toolName }: MCPToolCallRequest) {
+        return this.#allowed.has(toolName);
+    }
+}
+
+const mcpClient = new MCPClient(envID, connection, storage, rng, undefined, new AllowlistPolicy(["get_current_time"]));
+```
 
 ## Custom `MCP` subclasses
 

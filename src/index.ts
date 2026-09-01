@@ -24,7 +24,9 @@ export type { AgentProviderEntry, AgentProvidersInput } from "./core/agent-provi
 export { MCPRNG } from "./core/mcp-rng.js";
 export { MCPStorage } from "./core/mcp-storage.js";
 export { MCPFSStorage } from "./core/mcp-fs-storage.js";
-export { MCPFilter } from "./core/mcp-filter.js";
+export { MCPOutputFilter, MCPFilter } from "./core/mcp-filter.js";
+export { MCPExecutionPolicy, MCPBypassExecutionPolicy } from "./core/mcp-execution-policy.js";
+export type { MCPToolCallRequest } from "./core/mcp-execution-policy.js";
 
 
 export { SimpleAgent } from "./templates/simple.js";

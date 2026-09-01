@@ -75,7 +75,7 @@ Import a whole domain's tools at once (e.g. `FsTools()`), or import individual t
 
 ### Filesystem — `FsTools()`
 
-> ⚠️ `FsWriteFileTool` and `FsDeleteTool` can permanently overwrite, delete, or corrupt existing files — no undo. Prefer routing filesystem access through `MCPComputer`'s sandbox (see [MCP Architecture](./mcp-architecture.md#mcpcomputer-sandboxed-execution)) to protect the host system.
+> ⚠️ `FsWriteFileTool` and `FsDeleteTool` can permanently overwrite, delete, or corrupt existing files — no undo. Prefer routing filesystem access through `MCPComputer`'s sandbox (see [MCP Architecture](./mcp-architecture.md#mcpcomputer-sandboxed-execution)) to protect the host system, and/or gate these tools behind an `MCPExecutionPolicy` (see [`MCPExecutionPolicy`](./mcp-architecture.md#mcpexecutionpolicy-gating-tool-calls)) — e.g. denying `fs-write-file`/`fs-delete` outside an allowlisted directory, or requiring per-call confirmation.
 
 | Tool | Purpose |
 |---|---|
@@ -92,7 +92,7 @@ Import a whole domain's tools at once (e.g. `FsTools()`), or import individual t
 
 ### Bash / processes — `BashTools()`
 
-> ⚠️ Shell commands can permanently delete files, corrupt data, modify system settings, or execute harmful operations — no undo. Same sandboxing recommendation as above.
+> ⚠️ Shell commands can permanently delete files, corrupt data, modify system settings, or execute harmful operations — no undo. Same sandboxing recommendation as above, and the same `MCPExecutionPolicy` option — e.g. denying `bash-run` calls whose command matches a deny-list, or routing them through a human-confirmation policy.
 
 | Tool | Purpose |
 |---|---|

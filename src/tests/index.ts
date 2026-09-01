@@ -2,6 +2,8 @@ import "./core/mcp-computer.test.js";
 import "./core/mcp-connection.test.js";
 import "./core/mcp-ipc-connection.test.js";
 import "./core/mcp-ws-connection.test.js";
+import "./core/mcp-output-filter.test.js";
+import "./core/mcp-execution-policy.test.js";
 
 
 import "./tools/utils/delay.test.js";

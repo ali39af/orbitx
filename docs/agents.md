@@ -45,7 +45,7 @@ Token accounting no longer lives in `initData` as separate counters — every `M
 ## The run loop
 
 ```ts
-await agent.run(prompt: string, streamCallback?: StreamCallback): Promise<void>;
+await agent.run(prompt: string, streamCallback?: StreamCallback): Promise<boolean>;
 ```
 
 Each call to `run()`:
@@ -65,6 +65,22 @@ This is a deliberate design for absorbing multiple user prompts that arrive whil
 - **Multiple calls queue up:** every queued call except the last one has its prompt appended straight into history as a plain `role: "user"` message (with a matching stream chunk) and its own `run()` promise resolves immediately — no model turn is generated for that prompt specifically. The *last* queued call is the one that actually drives a real model turn, in a context that now includes every prompt that queued before it. The model's eventual reply addresses the whole accumulated batch at once, not each queued prompt individually.
 
 Practical implication: don't treat an early queued call's resolved `run()` promise as "the model has now answered this prompt" — for anything but the last queued call, it only means the prompt was recorded. Drive replies off `streamCallback` if you need to know when the model has actually responded.
+
+### The resolved boolean: "was my call the one that actually finished last?"
+
+`run()` resolves to `true` only for the call whose own loop iteration was the one still executing when the agent finally went idle (no other `run()` call queued behind it in the meantime); every other call — including every non-last call in a queued batch (see above) and a call that itself got superseded by a later one arriving while it ran — resolves to `false`.
+
+This matters for anything that should only happen exactly once — when the agent has truly gone idle — not once per overlapping `run()` call. A `console.log`/notification saying "agent finished" is a clear example: with several `run()` calls overlapping (a user firing off a couple of follow-ups before the first reply lands, or several callers hitting the same agent instance), every one of those calls eventually resolves — so logging on every resolution logs "finished" 2-3 times for what was really one continuous stretch of work, and the last one can land a noticeable delay after the others since it's the one that actually drove a full model turn. Gating on the resolved value being `true` instead fires exactly once, at the moment the agent actually has nothing left queued:
+
+```ts
+if (await agent.run(prompt, streamCallback)) {
+    console.log("agent finished"); // fires exactly once, when the agent is genuinely idle
+}
+// without the check: could log "finished" 2-3 times, with the last one arriving
+// minutes after the others if the final queued call drove a long tool-heavy turn
+```
+
+A `false` result isn't an error — it just means another `run()` call (either one already queued when yours was called, or one that queued while yours was executing) is the one that ended up driving the agent's final state, and that call is the one whose `true` you should be waiting on instead.
 
 `safeStop()` requests the current run stop at the next safe point; it resolves once the loop has actually stopped, or rejects if it doesn't stop within 4 minutes. It does not interrupt an in-flight model call — that call is left to finish normally, and the loop stops right after.
 

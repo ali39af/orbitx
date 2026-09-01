@@ -277,7 +277,7 @@ ${this.#buildSkillsAndMemoryBlock(skills)}`;
         this.#currentAbortController?.abort();
     }
 
-    async run(prompt: string, streamCallback?: StreamCallback): Promise<void> {
+    async run(prompt: string, streamCallback?: StreamCallback): Promise<boolean> {
         if (this.#runningProcess) {
             const result = await new Promise((res, rej) => {
                 let timeout: any = null;
@@ -296,7 +296,7 @@ ${this.#buildSkillsAndMemoryBlock(skills)}`;
                 this.#incomingRun.push({ prompt, timeout, interval, res });
             });
             if (result)
-                return;
+                return false;
             else {
                 this.#incomingRun = [];
             }
@@ -406,6 +406,11 @@ ${this.#buildSkillsAndMemoryBlock(skills)}`;
             }
         }
         this.#runningProcess = false;
+
+        if (this.#incomingRun.length == 0)
+            return true;
+        else
+            return false;
     }
 
     #sumTokensForType(type: ProviderType, messages: Message[]): { inputMiss: number; inputCache: number; output: number } {

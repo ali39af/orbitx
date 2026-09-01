@@ -5,13 +5,34 @@ import { toAnthropicTools } from "./tool-schema-translator.js";
 import { withRetry } from "./retry.js";
 
 const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-    "claude-opus-4-8": 200_000,
-    "claude-sonnet-5": 200_000,
+    "claude-opus-5": 1_000_000,
+    "claude-sonnet-5": 1_000_000,
+    "claude-fable-5": 1_000_000,
+    "claude-opus-4-8": 1_000_000,
+    "claude-opus-4-7": 1_000_000,
+    "claude-opus-4-6": 1_000_000,
+    "claude-sonnet-4-6": 1_000_000,
+    "claude-opus-4-5": 200_000,
+    "claude-sonnet-4-5": 200_000,
     "claude-haiku-4-5-20251001": 200_000,
-    "claude-fable-5": 200_000,
-    "claude-mythos-5": 200_000,
+    "claude-mythos-5": 1_000_000,
 };
 const DEFAULT_CONTEXT_WINDOW = 200_000;
+
+const MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
+    "claude-fable-5": 128_000,
+    "claude-mythos-5": 128_000,
+    "claude-opus-5": 128_000,
+    "claude-sonnet-5": 128_000,
+    "claude-opus-4-8": 128_000,
+    "claude-opus-4-7": 128_000,
+    "claude-opus-4-6": 128_000,
+    "claude-sonnet-4-6": 128_000,
+    "claude-opus-4-5": 64_000,
+    "claude-sonnet-4-5": 64_000,
+    "claude-haiku-4-5-20251001": 64_000,
+};
+const DEFAULT_MAX_OUTPUT_TOKENS = 128_000;
 
 // Anthropic's extended thinking takes a numeric token budget rather than a
 // low/medium/high enum, so the universal 0-1 `thinkEffort` is mapped onto a
@@ -91,6 +112,18 @@ function toAnthropicMessages(messages: Message[]): { system: string; messages: a
     return { system: systemParts.join("\n\n"), messages: out };
 }
 
+function withCacheControl(messages: any[]): any[] {
+    if (messages.length === 0) return messages;
+    const last = messages[messages.length - 1];
+    const content = typeof last.content === "string"
+        ? [{ type: "text", text: last.content }]
+        : [...last.content];
+    if (content.length === 0) return messages;
+    const lastIndex = content.length - 1;
+    content[lastIndex] = { ...content[lastIndex], cache_control: { type: "ephemeral" } };
+    return [...messages.slice(0, -1), { ...last, content }];
+}
+
 function fromAnthropicToolCalls(content: any[] | undefined): ToolCallRequest[] | undefined {
     if (!content) return undefined;
     const toolUses = content.filter((block: any) => block.type === "tool_use");
@@ -130,16 +163,22 @@ export class AnthropicProvider extends AIProvider {
     #maxTokens: number;
     /** Universal 0-1 thinking effort — see src/core/think-effort.ts. Mapped onto Anthropic's numeric thinking-token budget in #chat. */
     #thinkEffort?: number;
+    /** Opaque end-user identifier forwarded as `metadata.user_id` on every request, for Anthropic's own abuse-monitoring — see docs/providers.md#user-tracking. */
+    #userId?: string;
+    /** Ephemeral cache_control breakpoint on by default (see withCacheControl) — set true to send every request uncached. */
+    #disablePromptCaching: boolean;
 
-    constructor(apiKey: string, model: string = "claude-sonnet-5", options: { supportsTools?: boolean; supportsImages?: boolean; contextWindow?: number; maxTokens?: number; thinkEffort?: number } = {}) {
+    constructor(apiKey: string, model: string = "claude-sonnet-5", options: { supportsTools?: boolean; supportsImages?: boolean; contextWindow?: number; maxTokens?: number; thinkEffort?: number; userId?: string; disablePromptCaching?: boolean; extendedContext?: boolean | string } = {}) {
         super();
         this.#client = new Anthropic({ apiKey });
         this.#model = model;
         this.#supportsTools = options.supportsTools ?? true;
         this.#supportsImages = options.supportsImages ?? true;
-        this.#contextWindow = options.contextWindow ?? MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
+        this.#contextWindow = options.contextWindow ?? (MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW);
         this.#maxTokens = options.maxTokens ?? 4096;
         this.#thinkEffort = options.thinkEffort;
+        this.#userId = options.userId;
+        this.#disablePromptCaching = options.disablePromptCaching ?? false;
     }
 
     getCapabilities(): ProviderCapabilities {
@@ -147,9 +186,32 @@ export class AnthropicProvider extends AIProvider {
             supportsTools: this.#supportsTools,
             supportsImages: this.#supportsImages,
             contextWindow: this.#contextWindow,
-            safeUsageRatio: 0.5,
+            safeUsageRatio: 0.7,
             supportsThinking: true,
+            maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS[this.#model] ?? DEFAULT_MAX_OUTPUT_TOKENS,
+            supportsVideo: false,
+            supportsAudio: false,
+            supportsImageGeneration: false,
+            supportsImageEditing: false,
+            supportsVideoGeneration: false,
+            supportsVideoEditing: false,
+            supportsAudioGeneration: false,
+            supportsAudioDesign: false,
+            supportsAudioClone: false,
+            supports3DModelGeneration: false,
         };
+    }
+
+    /** Settable without reconstructing this provider: `thinkEffort`, `userId`, `disablePromptCaching`, `maxTokens`, `supportsTools` — every one of these is read fresh from the corresponding private field on every `chat()` call, never baked into derived state at construction (unlike `contextWindow`/`extendedContext`, which are out of scope here). */
+    setOption(key: string, value: unknown): void {
+        switch (key) {
+            case "thinkEffort": this.#thinkEffort = value as number | undefined; return;
+            case "userId": this.#userId = value as string | undefined; return;
+            case "disablePromptCaching": this.#disablePromptCaching = value as boolean; return;
+            case "maxTokens": this.#maxTokens = value as number; return;
+            case "supportsTools": this.#supportsTools = value as boolean; return;
+            default: throw new Error(`AnthropicProvider does not support setting option "${key}"`);
+        }
     }
 
     async chat(
@@ -158,10 +220,13 @@ export class AnthropicProvider extends AIProvider {
         tools?: ToolSchema[],
         signal?: AbortSignal
     ): Promise<ChatResponse> {
-        const { system, messages: formattedMessages } = toAnthropicMessages(messages);
+        const { system, messages: rawFormattedMessages } = toAnthropicMessages(messages);
+        const formattedMessages = this.#disablePromptCaching ? rawFormattedMessages : withCacheControl(rawFormattedMessages);
         const formattedTools = tools && tools.length > 0 && this.#supportsTools
             ? toAnthropicTools(tools)
             : undefined;
+        const metadataParam = this.#userId ? { metadata: { user_id: this.#userId } } : {};
+        const requestOptions = { signal };
 
         const thinkingBudget = this.#thinkEffort !== undefined
             ? resolveThinkingBudget(this.#thinkEffort, this.#maxTokens)
@@ -185,11 +250,13 @@ export class AnthropicProvider extends AIProvider {
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
                     ...thinkingParam,
+                    ...metadataParam,
                     stream: true,
-                }, { signal });
+                }, requestOptions);
 
                 let fullContent = "";
-                let inputTokens = 0;
+                let inputMissTokens = 0;
+                let inputCacheTokens = 0;
                 let outputTokens = 0;
                 // Anthropic streams tool_use blocks as a start event (with
                 // id/name) followed by incremental input_json_delta chunks,
@@ -226,14 +293,14 @@ export class AnthropicProvider extends AIProvider {
                         if (event.type === "content_block_delta") {
                             if (event.delta?.type === "text_delta" && event.delta.text) {
                                 fullContent += event.delta.text;
-                                await streamCallback({ role: "assistant", content: event.delta.text, done: false });
+                                await streamCallback({ role: "assistant", content: event.delta.text, done: false, usage: { inputMissTokens, inputCacheTokens, outputTokens } });
                             }
                             if (event.delta?.type === "input_json_delta" && toolBlocks[event.index]) {
                                 toolBlocks[event.index].inputJson += event.delta.partial_json || "";
                             }
                             if (event.delta?.type === "thinking_delta" && thinkingBlocks[event.index]) {
                                 thinkingBlocks[event.index].thinking += event.delta.thinking || "";
-                                await streamCallback({ role: "assistant", content: "", done: false, thinking: event.delta.thinking || "" });
+                                await streamCallback({ role: "assistant", content: "", done: false, thinking: event.delta.thinking || "", usage: { inputMissTokens, inputCacheTokens, outputTokens } });
                             }
                             if (event.delta?.type === "signature_delta" && thinkingBlocks[event.index]) {
                                 thinkingBlocks[event.index].signature += event.delta.signature || "";
@@ -249,16 +316,20 @@ export class AnthropicProvider extends AIProvider {
                             try { inputs = JSON.parse(tb.inputJson || "{}"); } catch { inputs = {}; }
                             const finished = { id: tb.id || "", name: tb.name || "", inputs };
                             finishedToolCalls.push(finished);
-                            await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [finished] });
+                            await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [finished], usage: { inputMissTokens, inputCacheTokens, outputTokens } });
                         }
 
                         if (event.type === "message_start") {
-                            inputTokens = event.message?.usage?.input_tokens || 0;
+                            const usage = event.message?.usage;
+                            inputMissTokens = (usage?.input_tokens || 0) + (usage?.cache_creation_input_tokens || 0);
+                            inputCacheTokens = usage?.cache_read_input_tokens || 0;
+                            await streamCallback({ role: "assistant", content: "", done: false, usage: { inputMissTokens, inputCacheTokens, outputTokens } });
                         }
 
                         if (event.type === "message_delta") {
                             if (event.usage?.output_tokens !== undefined) {
                                 outputTokens = event.usage.output_tokens;
+                                await streamCallback({ role: "assistant", content: "", done: false, usage: { inputMissTokens, inputCacheTokens, outputTokens } });
                             }
                         }
                     }
@@ -277,11 +348,12 @@ export class AnthropicProvider extends AIProvider {
                 const providerThinking = Object.keys(thinkingBlocks).length > 0 ? Object.values(thinkingBlocks) : undefined;
                 const thinkingText = providerThinking?.map(b => b.thinking).join("");
 
-                await streamCallback({ role: "assistant", content: "", done: true });
+                await streamCallback({ role: "assistant", content: "", done: true, usage: { inputMissTokens, inputCacheTokens, outputTokens } });
 
                 return {
                     content: fullContent,
-                    inputTokens,
+                    inputMissTokens,
+                    inputCacheTokens,
                     outputTokens,
                     ...(toolCalls ? { toolCalls } : {}),
                     ...(thinkingText ? { thinking: thinkingText } : {}),
@@ -297,14 +369,16 @@ export class AnthropicProvider extends AIProvider {
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
                     ...thinkingParam,
-                }, { signal });
+                    ...metadataParam,
+                }, requestOptions);
 
                 const toolCalls = fromAnthropicToolCalls(response.content as any);
                 const { text: thinkingText, blocks: providerThinking } = thinkingFromAnthropicContent(response.content as any);
 
                 return {
                     content: textFromAnthropicContent(response.content as any),
-                    inputTokens: response.usage?.input_tokens || 0,
+                    inputMissTokens: (response.usage?.input_tokens || 0) + ((response.usage as any)?.cache_creation_input_tokens || 0),
+                    inputCacheTokens: (response.usage as any)?.cache_read_input_tokens || 0,
                     outputTokens: response.usage?.output_tokens || 0,
                     ...(toolCalls ? { toolCalls } : {}),
                     ...(thinkingText ? { thinking: thinkingText } : {}),

@@ -3,9 +3,7 @@ export { AgentHireTool } from "./hire.js";
 export { AgentPromptTool } from "./prompt.js";
 export { AgentReportTool } from "./report.js";
 export { AgentRegistry } from "./registry.js";
-export { AgentInteraction } from "./interaction.js";
 export type { AgentInfo } from "./registry.js";
-export type { AgentEvent } from "./interaction.js";
 
 import type WorkerAgent from "../../core/worker-agent.js";
 import { AgentListTool } from "./list.js";

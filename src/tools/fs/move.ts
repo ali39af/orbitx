@@ -1,10 +1,9 @@
 import { rename, mkdir } from "fs/promises";
 import { dirname } from "path";
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import { FsInteraction } from "./interaction.js";
 import { resolvePath } from "./utils.js";
 
-export const FsMoveTool = () => new MCPTool<FsInteraction>({
+export const FsMoveTool = () => new MCPTool({
     name: "fs-move",
     description: "move or rename a file or directory",
     inputs: [
@@ -21,19 +20,16 @@ export const FsMoveTool = () => new MCPTool<FsInteraction>({
             required: true,
         },
     ],
-    customClass: new FsInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: MCP,
-        customClass?: FsInteraction
+        _toolCallId?: string,
+        _mcp?: MCP
     ): Promise<any> => {
         const { from, to } = inputs;
 
         const fullFrom = resolvePath(from);
         const fullTo = resolvePath(to);
-
-        customClass?.emitFsEvent({ type: "moving", from: fullFrom, to: fullTo });
 
         await mkdir(dirname(fullTo), { recursive: true });
 

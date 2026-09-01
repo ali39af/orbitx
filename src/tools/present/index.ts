@@ -1,8 +1,6 @@
 export { PresentAddTool } from "./add.js";
 export { PresentClearTool } from "./clear.js";
 export { PresentGetListTool } from "./get-list.js";
-export { PresentInteraction } from "./interaction.js";
-export type { PresentEvent } from "./interaction.js";
 export { getPresentFolder } from "./utils.js";
 
 

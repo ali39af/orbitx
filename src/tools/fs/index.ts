@@ -6,8 +6,6 @@ export { FsCreateDirTool } from "./create-dir.js";
 export { FsDeleteTool } from "./delete.js";
 export { FsMoveTool } from "./move.js";
 export { FsStatTool } from "./stat.js";
-export { FsInteraction } from "./interaction.js";
-export type { FsEvent } from "./interaction.js";
 
 
 import { FsReadFileTool } from "./read-file.js";

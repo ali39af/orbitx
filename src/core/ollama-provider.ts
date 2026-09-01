@@ -76,7 +76,7 @@ export class OllamaProvider extends AIProvider {
     /** Universal 0-1 thinking effort — see src/core/think-effort.ts. Mapped onto a boolean or OLLAMA_THINK_LEVELS in #chat; ignored by models that don't support thinking (Ollama itself ignores an unrecognized `think` value rather than erroring). */
     #thinkEffort?: number;
 
-    constructor(model: string, host: string = "http://localhost:11434", options: { supportsTools?: boolean; contextWindow?: number; thinkEffort?: number } = {}) {
+    constructor(model: string, host: string = "http://localhost:11434", options: { supportsTools?: boolean; contextWindow?: number; thinkEffort?: number; userId?: string } = {}) {
         super();
         this.#client = new Ollama({ host });
         this.#model = model;
@@ -90,9 +90,28 @@ export class OllamaProvider extends AIProvider {
             supportsTools: this.#supportsTools,
             supportsImages: true,
             contextWindow: this.#contextWindow,
-            safeUsageRatio: 0.5,
+            safeUsageRatio: 0.7,
             supportsThinking: true,
+            supportsVideo: false,
+            supportsAudio: false,
+            supportsImageGeneration: false,
+            supportsImageEditing: false,
+            supportsVideoGeneration: false,
+            supportsVideoEditing: false,
+            supportsAudioGeneration: false,
+            supportsAudioDesign: false,
+            supportsAudioClone: false,
+            supports3DModelGeneration: false,
         };
+    }
+
+    /** Settable without reconstructing this provider: `thinkEffort`, `supportsTools` — read fresh from the corresponding private field on every `chat()` call. */
+    setOption(key: string, value: unknown): void {
+        switch (key) {
+            case "thinkEffort": this.#thinkEffort = value as number | undefined; return;
+            case "supportsTools": this.#supportsTools = value as boolean; return;
+            default: throw new Error(`OllamaProvider does not support setting option "${key}"`);
+        }
     }
 
     async chat(
@@ -145,7 +164,7 @@ export class OllamaProvider extends AIProvider {
                         const content = chunk.message?.content || "";
                         if (content) {
                             fullContent += content;
-                            await streamCallback({ role: "assistant", content, done: false });
+                            await streamCallback({ role: "assistant", content, done: false, usage: { inputMissTokens: 0, inputCacheTokens: 0, outputTokens: 0 } });
                         }
 
                         // Thinking-capable models stream reasoning text on
@@ -153,7 +172,7 @@ export class OllamaProvider extends AIProvider {
                         const thinking = (chunk.message as any)?.thinking || "";
                         if (thinking) {
                             fullThinking += thinking;
-                            await streamCallback({ role: "assistant", content: "", done: false, thinking });
+                            await streamCallback({ role: "assistant", content: "", done: false, thinking, usage: { inputMissTokens: 0, inputCacheTokens: 0, outputTokens: 0 } });
                         }
 
                         if (chunk.message?.tool_calls?.length) {
@@ -166,7 +185,7 @@ export class OllamaProvider extends AIProvider {
                             for (const toolCall of toolCalls ?? []) {
                                 if (emittedToolCallIds.has(toolCall.id)) continue;
                                 emittedToolCallIds.add(toolCall.id);
-                                await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [toolCall] });
+                                await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [toolCall], usage: { inputMissTokens: 0, inputCacheTokens: 0, outputTokens: 0 } });
                             }
                         }
 
@@ -183,10 +202,11 @@ export class OllamaProvider extends AIProvider {
                     signal?.removeEventListener("abort", onAbort);
                 }
 
-                await streamCallback({ role: "assistant", content: "", done: true });
+                await streamCallback({ role: "assistant", content: "", done: true, usage: { inputMissTokens: promptEvalCount, inputCacheTokens: 0, outputTokens: evalCount } });
                 return {
                     content: fullContent,
-                    inputTokens: promptEvalCount,
+                    inputMissTokens: promptEvalCount,
+                    inputCacheTokens: 0,
                     outputTokens: evalCount,
                     ...(toolCalls ? { toolCalls } : {}),
                     ...(fullThinking ? { thinking: fullThinking } : {}),
@@ -206,7 +226,8 @@ export class OllamaProvider extends AIProvider {
 
                 return {
                     content: response.message?.content || "",
-                    inputTokens: response.prompt_eval_count || 0,
+                    inputMissTokens: response.prompt_eval_count || 0,
+                    inputCacheTokens: 0,
                     outputTokens: response.eval_count || 0,
                     ...(fromOllamaToolCalls(response.message?.tool_calls as any) ? { toolCalls: fromOllamaToolCalls(response.message?.tool_calls as any) } : {}),
                     ...(thinking ? { thinking } : {}),

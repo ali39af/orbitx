@@ -1,8 +1,7 @@
 import { MCPTool, generateRefId, type MCP } from "../../core/mcp.js";
-import { BrowserInteraction } from "./interaction.js";
 import { createSession } from "./session-manager.js";
 
-export const BrowserCreateSessionTool = () => new MCPTool<BrowserInteraction>({
+export const BrowserCreateSessionTool = () => new MCPTool({
     name: "browser-create-session",
     description: "open a new headless browser session at a given url, returns its sessionId",
     inputs: [
@@ -13,12 +12,11 @@ export const BrowserCreateSessionTool = () => new MCPTool<BrowserInteraction>({
             required: true,
         },
     ],
-    customClass: new BrowserInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        mcp?: MCP,
-        customClass?: BrowserInteraction
+        _toolCallId?: string,
+        mcp?: MCP
     ): Promise<any> => {
         const { url } = inputs;
 
@@ -27,8 +25,6 @@ export const BrowserCreateSessionTool = () => new MCPTool<BrowserInteraction>({
         }
 
         const sessionId = await generateRefId(mcp);
-
-        customClass?.emitBrowserEvent({ type: "session-created", sessionId, url });
 
         await createSession(url, sessionId);
 

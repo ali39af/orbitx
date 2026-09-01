@@ -1,8 +1,7 @@
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import { TodoInteraction } from "./interaction.js";
 import { getList, getListIndex, setListIndex, deleteListKey, deleteTaskKey } from "./storage.js";
 
-export const TodoRemoveListTool = () => new MCPTool<TodoInteraction>({
+export const TodoRemoveListTool = () => new MCPTool({
     name: "todo-remove-list",
     description: "remove one or more todo lists (and all of their tasks)",
     inputs: [
@@ -13,12 +12,11 @@ export const TodoRemoveListTool = () => new MCPTool<TodoInteraction>({
             required: true,
         },
     ],
-    customClass: new TodoInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        mcp?: MCP,
-        customClass?: TodoInteraction
+        _toolCallId?: string,
+        mcp?: MCP
     ): Promise<any> => {
         const { lists } = inputs;
 
@@ -42,8 +40,6 @@ export const TodoRemoveListTool = () => new MCPTool<TodoInteraction>({
 
         const index = await getListIndex(mcp);
         await setListIndex(mcp, index.filter((id) => !lists.includes(id)));
-
-        customClass?.emitTodoEvent({ type: "list-removed", listIds: lists });
 
         return {
             message: "success",

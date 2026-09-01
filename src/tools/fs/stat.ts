@@ -1,9 +1,8 @@
 import { stat } from "fs/promises";
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import { FsInteraction } from "./interaction.js";
 import { resolvePath } from "./utils.js";
 
-export const FsStatTool = () => new MCPTool<FsInteraction>({
+export const FsStatTool = () => new MCPTool({
     name: "fs-stat",
     description: "check whether a path exists and get its metadata (type, size, modified time)",
     inputs: [
@@ -14,18 +13,15 @@ export const FsStatTool = () => new MCPTool<FsInteraction>({
             required: true,
         },
     ],
-    customClass: new FsInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: MCP,
-        customClass?: FsInteraction
+        _toolCallId?: string,
+        _mcp?: MCP
     ): Promise<any> => {
         const { path } = inputs;
 
         const fullPath = resolvePath(path);
-
-        customClass?.emitFsEvent({ type: "stat", path: fullPath });
 
         try {
             const s = await stat(fullPath);

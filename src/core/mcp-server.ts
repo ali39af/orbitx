@@ -3,12 +3,16 @@ import type MCPConnection from "./mcp-connection.js";
 import type MCPStorage from "./mcp-storage.js";
 import MCPFSStorage from "./mcp-fs-storage.js";
 import MCPRNG from "./mcp-rng.js";
+import { randomUUID } from "crypto";
+import type { ProviderType } from "./ai-provider.js";
+
+const EXECUTE_PROVIDER_TIMEOUT_MS = 120000;
 
 export class MCPServer extends MCP {
     #connection;
     #storage;
     #rng;
-    #tools: MCPTool<any>[] = [];
+    #tools: MCPTool[] = [];
     constructor(connection: MCPConnection, storage: MCPStorage = new MCPFSStorage(), rng?: MCPRNG) {
         super();
         this.#connection = connection;
@@ -33,7 +37,7 @@ export class MCPServer extends MCP {
             if (topic == "toolCall") {
                 const tool = this.#tools.find(t => t.getOptions().name == data.tool);
                 if (tool) {
-                    tool.getOptions().execute(data.envID, data.inputs, tool.getMCP(), tool.getOptions().customClass).then((response) => {
+                    tool.getOptions().execute(data.envID, data.inputs, data.toolCallId, tool.getMCP()).then((response) => {
                         this.#connection.emit("write_to_client", {
                             pid,
                             topic: "toolCallCallback",
@@ -59,7 +63,35 @@ export class MCPServer extends MCP {
         return this.#rng;
     }
 
-    registerTool(tool: MCPTool<any>) {
+    executeProvider(toolCallId: string, type: ProviderType, input: Record<string, any>): Promise<{ output: Record<string, any> }> {
+        return new Promise((resolve, reject) => {
+            const pid = randomUUID();
+            let settled = false;
+
+            const onRead = (data: any) => {
+                if (data.topic === "executeProviderResponse" && data.pid === pid) {
+                    this.#connection.off("server_read", onRead);
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timer);
+                    if (data.error) reject(new Error(data.error));
+                    else resolve({ output: data.output ?? {} });
+                }
+            };
+
+            const timer = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                this.#connection.off("server_read", onRead);
+                reject(new Error(`MCPServer.executeProvider: no response for type "${type}" within ${EXECUTE_PROVIDER_TIMEOUT_MS}ms.`));
+            }, EXECUTE_PROVIDER_TIMEOUT_MS);
+
+            this.#connection.on("server_read", onRead);
+            this.#connection.emit("write_to_client", { pid, topic: "executeProvider", toolCallId, type, input });
+        });
+    }
+
+    registerTool(tool: MCPTool) {
         tool.setMCP(this);
         this.#tools.push(tool);
     }

@@ -49,7 +49,7 @@ Every provider implements the same `AIProvider` interface, so switching models i
 
 ## Recovering an agent's state
 
-`getCurrentAgentStates()` returns a plain JSON-serializable snapshot: message history, running memory summary, and token counters. Persist it anywhere; pass it back in as `initData` to resume the exact same agent later (after a process restart, in a new request handler, etc.):
+`getCurrentAgentStates()` returns a plain JSON-serializable snapshot: message history (each message carrying its own token usage) and running memory summary. Persist it anywhere; pass it back in as `initData` to resume the exact same agent later (after a process restart, in a new request handler, etc.):
 
 ```ts
 import { writeFileSync, existsSync, readFileSync } from "fs";
@@ -69,7 +69,7 @@ const agent = new SimpleAgent({
 writeFileSync("./state.json", JSON.stringify(agent.getCurrentAgentStates()));
 ```
 
-Messages are only ever appended, never rewritten. When the conversation grows past the memory threshold, OrbitX keeps the full history on disk (`messagesFull`) but resets the model's *working* context from a running summary, so an agent can keep going indefinitely without losing the ability to act on what happened earlier. Mechanics are covered in [Agents](./agents.md#memory-compaction).
+Messages are only ever appended, never rewritten. When the conversation grows past the memory threshold, OrbitX retires the working context into `retiredMessages` and resets the model's *active* context (`messagesCompact`) from a running summary (`compactMemory`), so an agent can keep going indefinitely without losing the ability to act on what happened earlier — nothing on disk is ever deleted, it just moves from one array to the other. Mechanics are covered in [Agents](./agents.md#memory-compaction).
 
 ## Next steps
 

@@ -1,8 +1,7 @@
 import { MCPTool } from "../../core/mcp.js";
-import { BrowserInteraction } from "./interaction.js";
 import { getSession } from "./session-manager.js";
 
-export const BrowserScrollTool = () => new MCPTool<BrowserInteraction>({
+export const BrowserScrollTool = () => new MCPTool({
     name: "browser-scroll",
     description: "scroll the page to a given vertical position (in pixels)",
     inputs: [
@@ -19,12 +18,11 @@ export const BrowserScrollTool = () => new MCPTool<BrowserInteraction>({
             required: true,
         },
     ],
-    customClass: new BrowserInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: any,
-        customClass?: BrowserInteraction
+        _toolCallId?: string,
+        _mcp?: any
     ): Promise<any> => {
         const { sessionId, position } = inputs;
 
@@ -35,8 +33,6 @@ export const BrowserScrollTool = () => new MCPTool<BrowserInteraction>({
         if (typeof position !== "number" || !Number.isFinite(position)) {
             throw new Error("position must be a number");
         }
-
-        customClass?.emitBrowserEvent({ type: "scrolling", sessionId, position });
 
         const session = getSession(sessionId);
 

@@ -4,8 +4,6 @@ export { BashLogsTool } from "./logs.js";
 export { BashListTool } from "./list.js";
 export { BashWriteInputTool } from "./write-input.js";
 export { BashTerminateTool } from "./terminate.js";
-export { BashInteraction } from "./interaction.js";
-export type { BashEvent } from "./interaction.js";
 
 
 import { BashRunTool } from "./run.js";

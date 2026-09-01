@@ -1,9 +1,8 @@
 import { readFile } from "fs/promises";
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import { FsInteraction } from "./interaction.js";
 import { resolvePath, toLines, paginateLines } from "./utils.js";
 
-export const FsReadFileTool = () => new MCPTool<FsInteraction>({
+export const FsReadFileTool = () => new MCPTool({
     name: "fs-read-file",
     description:
         "read a text file from disk, optionally paging through it by line so large files never need to be read in one shot",
@@ -29,18 +28,15 @@ export const FsReadFileTool = () => new MCPTool<FsInteraction>({
             default: 2000,
         },
     ],
-    customClass: new FsInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: MCP,
-        customClass?: FsInteraction
+        _toolCallId?: string,
+        _mcp?: MCP
     ): Promise<any> => {
         const { path, offsetLine = 1, limitLine = 2000 } = inputs;
 
         const fullPath = resolvePath(path);
-
-        customClass?.emitFsEvent({ type: "reading", path: fullPath });
 
         let raw: string;
         try {

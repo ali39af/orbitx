@@ -6,14 +6,19 @@ import MCPRNG from "./mcp-rng.js";
 import type MCPStorage from "./mcp-storage.js";
 import MCPFSStorage from "./mcp-fs-storage.js";
 import MCPFilter from "./mcp-filter.js";
+import type { ProviderType } from "./ai-provider.js";
+
+type ExecuteProviderHandler = (toolCallId: string, type: ProviderType, input: Record<string, any>) => Promise<{ output: Record<string, any> }>;
 
 export class MCPClient extends MCP {
     #connections;
     #storage;
     #rng;
     #mcpFilter;
-    #tools: MCPTool<any>[] = [];
+    #tools: MCPTool[] = [];
     #envID;
+    #executeProviderHandler?: ExecuteProviderHandler;
+
     constructor(envID: string, connection: MCPConnection | MCPConnection[], storage: MCPStorage = new MCPFSStorage(), rng?: MCPRNG, mcpFilter?: MCPFilter) {
         super();
         this.#storage = storage;
@@ -21,13 +26,25 @@ export class MCPClient extends MCP {
             rng = new MCPRNG(storage);
         if (!mcpFilter)
             mcpFilter = new MCPFilter([
-                // /\b(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.)\d{1,3}\.\d{1,3}\b/g // Prevent any local ip leakage by default you can pass empty MCPFilter to disable it 
+                // /\b(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.)\d{1,3}\.\d{1,3}\b/g // Prevent any local ip leakage by default you can pass empty MCPFilter to disable it
                 // we add some default security roles after this feature become stable
             ]);
         this.#mcpFilter = mcpFilter;
         this.#rng = rng;
         this.#connections = Array.isArray(connection) ? connection : [connection];
         this.#envID = envID;
+
+        for (const conn of this.#connections) {
+            conn.on("client_read", async (data: any) => {
+                if (data.topic !== "executeProvider") return;
+                try {
+                    const result = await this.executeProvider(data.toolCallId, data.type, data.input);
+                    conn.emit("write_to_server", { pid: data.pid, topic: "executeProviderResponse", output: result.output });
+                } catch (err: any) {
+                    conn.emit("write_to_server", { pid: data.pid, topic: "executeProviderResponse", error: err?.message ?? String(err) });
+                }
+            });
+        }
     }
 
     getStorage(): MCPStorage {
@@ -36,6 +53,17 @@ export class MCPClient extends MCP {
 
     getRNG(): MCPRNG {
         return this.#rng;
+    }
+
+    setExecuteProviderHandler(handler: ExecuteProviderHandler): void {
+        this.#executeProviderHandler = handler;
+    }
+
+    executeProvider(toolCallId: string, type: ProviderType, input: Record<string, any>): Promise<{ output: Record<string, any> }> {
+        if (!this.#executeProviderHandler) {
+            throw new Error("MCPClient.executeProvider: no provider-resolving agent is attached to this client.");
+        }
+        return this.#executeProviderHandler(toolCallId, type, input);
     }
 
     async getTools() {
@@ -89,10 +117,10 @@ export class MCPClient extends MCP {
         return [...clientTools, ...connectionsTools.filter(t => !clientToolNames.has(t.name))];
     }
 
-    async callTool(toolName: string, inputs: Record<string, any>) {
+    async callTool(toolName: string, inputs: Record<string, any>, toolCallId?: string) {
         const clientTool = this.#tools.find(t => t.getOptions().name == toolName);
         if (clientTool) {
-            const raw = await clientTool.getOptions().execute(this.#envID, inputs, clientTool.getMCP(), clientTool.getOptions().customClass);
+            const raw = await clientTool.getOptions().execute(this.#envID, inputs, toolCallId, clientTool.getMCP());
             return this.#mcpFilter.filter(normalizeToolOutput(raw));
         } else {
             const raw = await new Promise<any>((resolve) => {
@@ -116,7 +144,8 @@ export class MCPClient extends MCP {
                         topic: "toolCall",
                         tool: toolName,
                         envID: this.#envID,
-                        inputs
+                        inputs,
+                        toolCallId
                     });
                 });
             });
@@ -124,7 +153,7 @@ export class MCPClient extends MCP {
         }
     }
 
-    registerTool(tool: MCPTool<any>) {
+    registerTool(tool: MCPTool) {
         tool.setMCP(this);
         this.#tools.push(tool);
     }

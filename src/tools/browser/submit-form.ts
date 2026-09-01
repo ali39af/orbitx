@@ -1,9 +1,8 @@
 import { MCPTool } from "../../core/mcp.js";
-import { BrowserInteraction } from "./interaction.js";
 import { getSession } from "./session-manager.js";
 import { submitForm } from "./read-page.js";
 
-export const BrowserSubmitFormTool = () => new MCPTool<BrowserInteraction>({
+export const BrowserSubmitFormTool = () => new MCPTool({
     name: "browser-submit-form",
     description:
         "submit a <form> on the page by its ref id (the [FORM] ref shown by browser-read). " +
@@ -23,12 +22,11 @@ export const BrowserSubmitFormTool = () => new MCPTool<BrowserInteraction>({
             required: true,
         },
     ],
-    customClass: new BrowserInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: any,
-        customClass?: BrowserInteraction
+        _toolCallId?: string,
+        _mcp?: any
     ): Promise<any> => {
         const { sessionId, formRef } = inputs;
 
@@ -39,8 +37,6 @@ export const BrowserSubmitFormTool = () => new MCPTool<BrowserInteraction>({
         if (!formRef || typeof formRef !== "string") {
             throw new Error("formRef must be a non-empty string");
         }
-
-        customClass?.emitBrowserEvent({ type: "submitting-form", sessionId, formRef });
 
         const session = getSession(sessionId);
         const submitted = await submitForm(session.page, formRef);

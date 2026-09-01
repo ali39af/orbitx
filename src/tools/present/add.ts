@@ -1,10 +1,9 @@
 import { copyFile, stat } from "fs/promises";
 import { basename, join, resolve } from "path";
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import { PresentInteraction } from "./interaction.js";
 import { ensurePresentFolder, listPresentFiles } from "./utils.js";
 
-export const PresentAddTool = () => new MCPTool<PresentInteraction>({
+export const PresentAddTool = () => new MCPTool({
     name: "present-add",
     description:
         "present a file to the user by copying it into the present folder so the host application can surface it (e.g. as a download link or preview). " +
@@ -18,12 +17,11 @@ export const PresentAddTool = () => new MCPTool<PresentInteraction>({
             required: true,
         },
     ],
-    customClass: new PresentInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: MCP,
-        customClass?: PresentInteraction
+        _toolCallId?: string,
+        _mcp?: MCP
     ): Promise<any> => {
         const { path } = inputs;
 
@@ -58,7 +56,6 @@ export const PresentAddTool = () => new MCPTool<PresentInteraction>({
 
         // Emitted AFTER the copy completes, so anything listening always
         // sees an up-to-date present folder the moment it's notified.
-        customClass?.emitPresentEvent({ type: "presents-updated", paths });
 
         return {
             message: "success",

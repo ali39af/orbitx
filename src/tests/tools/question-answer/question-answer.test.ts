@@ -6,18 +6,12 @@ describe("question-answer/question-answer", () => {
     let mcpConnection: MCPConnection | undefined;
     let mcpClient: MCPClient;
     let mcpServer: MCPServer;
-    let events: any[];
 
     before(async () => {
         mcpConnection = new MCPConnection();
         mcpClient = new MCPClient("1234", mcpConnection);
         mcpServer = new MCPServer(mcpConnection);
-
-        const tool = QuestionAnswerTool();
-        mcpServer.registerTool(tool);
-
-        events = [];
-        tool.getOptions().customClass?.getEvents().on("question-answer", (e) => events.push(e));
+        mcpServer.registerTool(QuestionAnswerTool());
     });
 
     after(async () => {
@@ -30,14 +24,5 @@ describe("question-answer/question-answer", () => {
         });
 
         assert.strictEqual(result.output.message, "success");
-    });
-
-    test("QuestionAnswerTool: emits a question-answer event through its interaction class", async () => {
-        events.length = 0;
-
-        await mcpClient.callTool("question-answer", { questions: [{ question: "ok?" }] });
-
-        assert.strictEqual(events.length, 1);
-        assert.deepStrictEqual(events[0], { type: "question-answer" });
     });
 });

@@ -5,9 +5,7 @@ export { TodoGetListTool } from "./get-list.js";
 export { TodoCreateTaskTool } from "./create-task.js";
 export { TodoRemoveTaskTool } from "./remove-task.js";
 export { TodoCheckTaskTool } from "./check-task.js";
-export { TodoInteraction } from "./interaction.js";
 export type { TodoTask, TodoList } from "./storage.js";
-export type { TodoEvent } from "./interaction.js";
 
 
 import { TodoCreateListTool } from "./create-list.js";

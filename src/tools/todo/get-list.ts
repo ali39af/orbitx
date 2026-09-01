@@ -12,7 +12,7 @@ export const TodoGetListTool = () => new MCPTool({
             required: true,
         },
     ],
-    execute: async (_envID: string, inputs: Record<string, any>, mcp?: MCP): Promise<any> => {
+    execute: async (_envID: string, inputs: Record<string, any>, _toolCallId?: string, mcp?: MCP): Promise<any> => {
         const { list } = inputs;
 
         if (!list || typeof list !== "string") {

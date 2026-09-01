@@ -22,6 +22,9 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
     "gpt-5": 400_000,
     "gpt-5-mini": 400_000,
     "gpt-5-nano": 400_000,
+    "gpt-5.6-sol": 1_050_000,
+    "gpt-5.6-terra": 1_050_000,
+    "gpt-5.6-luna": 1_050_000,
     "gpt-4.1": 1_047_576,
     "gpt-4.1-mini": 1_047_576,
     "gpt-4o": 128_000,
@@ -30,6 +33,9 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
     "o4-mini": 200_000,
 };
 const DEFAULT_CONTEXT_WINDOW = 128_000;
+
+/** Uniform across every OpenAI model — see ProviderCapabilities.maxOutputTokens. */
+const MAX_OUTPUT_TOKENS = 128_000;
 
 // Models whose Chat Completions image support is text-only / unsupported —
 // kept as an explicit denylist so new models default to "supports images"
@@ -94,8 +100,10 @@ export class OpenAIProvider extends AIProvider {
     #contextWindow: number;
     /** Universal 0-1 thinking effort — see src/core/think-effort.ts. Ignored unless the model is reasoning-capable (see isReasoningModel). */
     #thinkEffort?: number;
+    /** Opaque end-user identifier forwarded as `user_id` on every request — see docs/providers.md#user-tracking. */
+    #userId?: string;
 
-    constructor(apiKey: string, model: string = "gpt-5", options: { supportsTools?: boolean; supportsImages?: boolean; contextWindow?: number; baseURL?: string; thinkEffort?: number } = {}) {
+    constructor(apiKey: string, model: string = "gpt-5", options: { supportsTools?: boolean; supportsImages?: boolean; contextWindow?: number; baseURL?: string; thinkEffort?: number; userId?: string } = {}) {
         super();
         this.#client = new OpenAI({
             apiKey: apiKey,
@@ -106,6 +114,7 @@ export class OpenAIProvider extends AIProvider {
         this.#supportsImages = options.supportsImages ?? !NO_IMAGE_MODELS.has(model);
         this.#contextWindow = options.contextWindow ?? MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
         this.#thinkEffort = options.thinkEffort;
+        this.#userId = options.userId;
     }
 
     getCapabilities(): ProviderCapabilities {
@@ -113,9 +122,30 @@ export class OpenAIProvider extends AIProvider {
             supportsTools: this.#supportsTools,
             supportsImages: this.#supportsImages,
             contextWindow: this.#contextWindow,
-            safeUsageRatio: 0.5,
+            safeUsageRatio: 0.7,
             supportsThinking: false,
+            maxOutputTokens: MAX_OUTPUT_TOKENS,
+            supportsVideo: false,
+            supportsAudio: false,
+            supportsImageGeneration: false,
+            supportsImageEditing: false,
+            supportsVideoGeneration: false,
+            supportsVideoEditing: false,
+            supportsAudioGeneration: false,
+            supportsAudioDesign: false,
+            supportsAudioClone: false,
+            supports3DModelGeneration: false,
         };
+    }
+
+    /** Settable without reconstructing this provider: `thinkEffort`, `userId`, `supportsTools` — read fresh from the corresponding private field on every `chat()` call. */
+    setOption(key: string, value: unknown): void {
+        switch (key) {
+            case "thinkEffort": this.#thinkEffort = value as number | undefined; return;
+            case "userId": this.#userId = value as string | undefined; return;
+            case "supportsTools": this.#supportsTools = value as boolean; return;
+            default: throw new Error(`OpenAIProvider does not support setting option "${key}"`);
+        }
     }
 
     async chat(
@@ -132,6 +162,7 @@ export class OpenAIProvider extends AIProvider {
             ? resolveThinkEffortLevel(this.#thinkEffort, OPENAI_THINK_LEVELS)
             : undefined;
         const thinkParam = thinkLevel !== undefined ? { reasoning_effort: thinkLevel } : {};
+        const userParam = this.#userId ? { metadata: { user_id: this.#userId } } as any : {};
 
         if (streamCallback) {
             return withRetry(async () => {
@@ -143,12 +174,14 @@ export class OpenAIProvider extends AIProvider {
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
                     ...thinkParam,
+                    ...userParam,
                     stream: true,
                     stream_options: { include_usage: true },
-                }, { signal });
+                }, { signal }) as any;
 
                 let fullContent = "";
-                let inputTokens = 0;
+                let inputMissTokens = 0;
+                let inputCacheTokens = 0;
                 let outputTokens = 0;
                 const toolCallChunks: Record<number, { id?: string; name?: string; arguments: string }> = {};
                 // OpenAI streams tool calls sequentially, one index at a
@@ -171,7 +204,7 @@ export class OpenAIProvider extends AIProvider {
                     try { inputs = JSON.parse(tc.arguments || "{}"); } catch { inputs = {}; }
                     const finished = { id: tc.id || "", name: tc.name || "", inputs };
                     finalizedToolCalls.push(finished);
-                    await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [finished] });
+                    await streamCallback({ role: "assistant", content: "", done: false, toolCalls: [finished], usage: { inputMissTokens: 0, inputCacheTokens: 0, outputTokens: 0 } });
                 };
 
                 try {
@@ -180,7 +213,7 @@ export class OpenAIProvider extends AIProvider {
                         const content = delta?.content || "";
                         if (content) {
                             fullContent += content;
-                            await streamCallback({ role: "assistant", content, done: false });
+                            await streamCallback({ role: "assistant", content, done: false, usage: { inputMissTokens: 0, inputCacheTokens: 0, outputTokens: 0 } });
                         }
 
                         if (delta?.tool_calls) {
@@ -198,7 +231,9 @@ export class OpenAIProvider extends AIProvider {
                         }
 
                         if (chunk.usage) {
-                            inputTokens = chunk.usage.prompt_tokens || 0;
+                            const cachedTokens = (chunk.usage as any).prompt_tokens_details?.cached_tokens || 0;
+                            inputCacheTokens = cachedTokens;
+                            inputMissTokens = (chunk.usage.prompt_tokens || 0) - cachedTokens;
                             outputTokens = chunk.usage.completion_tokens || 0;
                         }
                     }
@@ -212,11 +247,12 @@ export class OpenAIProvider extends AIProvider {
 
                 const toolCalls: ToolCallRequest[] | undefined = finalizedToolCalls.length > 0 ? finalizedToolCalls : undefined;
 
-                await streamCallback({ role: "assistant", content: "", done: true });
+                await streamCallback({ role: "assistant", content: "", done: true, usage: { inputMissTokens, inputCacheTokens, outputTokens } });
 
                 return {
                     content: fullContent,
-                    inputTokens,
+                    inputMissTokens,
+                    inputCacheTokens,
                     outputTokens,
                     ...(toolCalls ? { toolCalls } : {}),
                 };
@@ -228,14 +264,17 @@ export class OpenAIProvider extends AIProvider {
                     messages: formattedMessages as any,
                     ...(formattedTools ? { tools: formattedTools } : {}),
                     ...thinkParam,
+                    ...userParam,
                 }, { signal });
 
                 const message = response.choices[0]?.message;
                 const toolCalls = fromOpenAIToolCalls(message?.tool_calls as any);
+                const cachedTokens = (response.usage as any)?.prompt_tokens_details?.cached_tokens || 0;
 
                 return {
                     content: message?.content || "",
-                    inputTokens: response.usage?.prompt_tokens || 0,
+                    inputMissTokens: (response.usage?.prompt_tokens || 0) - cachedTokens,
+                    inputCacheTokens: cachedTokens,
                     outputTokens: response.usage?.completion_tokens || 0,
                     ...(toolCalls ? { toolCalls } : {}),
                 };

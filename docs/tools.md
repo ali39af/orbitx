@@ -16,21 +16,54 @@ new MCPTool({
     default?: any;
   }[];
   stopIterationAfterUsingThisTool?: boolean;   // default false
-  customClass?: MCPCustomClass;                // optional stateful helper, see below
   execute: (
     envID: string,
     inputs: Record<string, any>,
-    mcp?: MCP,
-    customClass?: typeof customClass
+    toolCallId?: string,
+    mcp?: MCP
   ) => Promise<any>;
 });
 ```
 
 - `inputs` doubles as both the JSON-schema-like description sent to the model (translated per-provider by `src/core/tool-schema-translator.ts`) and the shape `execute` should expect on `inputs`.
 - `stopIterationAfterUsingThisTool: true` ends the agent's run loop immediately after this tool fires, even if the model didn't naturally stop calling tools — useful for a "final answer" or "hand off" style tool.
-- `execute`'s return value is normalized via `normalizeToolOutput()` into either `{ type: "text", output: {...} }` or `{ type: "image", output: { image, mimeType, ... } }`. Return `{ type: "image", output: {...} }` explicitly to hand back an image (it gets routed through the agent's image provider — see [Providers](./providers.md#two-provider-roles-main--image)); anything else is treated as a plain JSON text result.
+- `execute`'s return value is normalized via `normalizeToolOutput()` into `{ output: {...} }` — return a plain object (or anything else) and it becomes `output` as-is, same convention as always.
 - `envID` identifies which "environment" (in-process client id, IPC/WS session) the call came from — most tools ignore it unless they need per-environment isolated state (see `MCPStorage`/`MCPFSStorage` in [MCP Architecture](./mcp-architecture.md)).
-- `customClass` (a subclass of `MCPCustomClass`) is a way to give a tool its own persistent helper object with access to the owning `MCP` instance (`getMCP()`) and an `EventEmitter` (`getEvents()`) for progress/status events — see how the built-in `*Interaction` classes are used (e.g. `FsInteraction`, `BrowserInteraction`) if you want to expose live progress to a UI. **Experimental:** `customClass` is still settling — its name and shape may change (or it may be removed) in a future release, so avoid depending on it for anything beyond the built-in `*Interaction` pattern until it stabilizes.
+- `toolCallId` is this specific call's id, needed only by a tool that calls `mcp.executeProvider(...)` (see below) — everything else can ignore it.
+
+### `mcp.executeProvider(...)` — calling a provider from inside a tool
+
+`MCP` (what `execute`'s 4th argument gives you, same as it always has) has one method beyond `getStorage()`/`getRNG()`:
+
+```ts
+abstract class MCP {
+  getStorage(): MCPStorage;
+  getRNG(): MCPRNG;
+  executeProvider(toolCallId: string, type: ProviderType, input: Record<string, any>): Promise<{ output: Record<string, any> }>;
+}
+```
+
+`type` picks a role (see [Provider roles](./providers.md#provider-roles)); `input` must be `Message`-shaped — `{ content: string }` for plain text, or `{ parts: MessageContentPart[] }` when real multimodal content (an image, say) needs to reach the provider. `BaseAgent#executeProvider` spreads `input` straight onto the outgoing `role: "user"` message (no `safetyPolicies` system message here, unlike the main run loop — see [Guardrail system prompt](./agents.md#guardrail-system-prompt)) and stays completely type-agnostic itself — it never branches on `type`, so a role that needs `parts` (`image-describer`) and one that only needs `content` (a plain text-generation role) go through the exact same code path. Shaping `input` correctly is the calling tool's job: **use `parts`, not a `data:` URI folded into `content`, for images/video** — every built-in provider (Anthropic/OpenAI/DeepSeek/Ollama) only builds a real multimodal content block from `Message.parts`; a base64 string inside `content` is sent to the model as literal text, not an image. This works identically no matter where the tool is registered — directly on an `MCPClient`, or on a sandboxed/remote `MCPServer` (see [MCP Architecture](./mcp-architecture.md#custom-mcp-subclasses)) — because the actual provider call always happens on the trusted side (wherever `BaseAgent` lives): a client-registered tool reaches it in-process, a server-registered one has the request proxied there over the existing connection and back. No provider instance, or the credentials it holds, is ever visible to the tool — only this request/response.
+
+**Off by default.** `executeProvider` throws immediately unless the owning `BaseAgent` was constructed with `features: { executeProviderFromMCPTool: true }` (see [`executeProvider` feature flag](./agents.md#executeprovider-feature-flag)) — a tool reaching a provider directly, with no guardrail prompt ahead of it, is a bigger trust surface than one that only returns data to the model, so it needs an explicit opt-in from whoever builds the agent.
+
+`read-image`/`browser-screenshot` (below) are the reference example — the instruction as a `text` part, the base64 image as an `image` part:
+
+```ts
+const { output } = await mcp.executeProvider(toolCallId, "image-describer", {
+  parts: [
+    { type: "text", text: instruction },
+    { type: "image", image, mimeType },
+  ],
+});
+return { description: output.content }; // output.content: string
+```
+
+If `executeProvider` rejects (no provider configured for that role, etc.), just let it throw — `BaseAgent`'s existing `execute()` error handling turns it into a normal `Error: ...` tool result, no special handling needed.
+
+### Usage is never something a tool reports itself
+
+There's no `usage` field on what `execute` returns. Every `executeProvider` call is recorded by `BaseAgent` the instant the real provider call resolves — keyed by `toolCallId`, moved onto the tool's result `Message.usage` only after `execute()` returns (see [Token accounting](./agents.md#token-accounting)) — specifically so a compromised or rewritten tool can't just under-report what it spent; it never holds that number to begin with.
 
 Tools are registered on an `MCPServer` and invoked through an `MCPClient`; `SimpleAgent` does this wiring for you from a flat `tools` array.
 
@@ -38,7 +71,7 @@ One tool schema the model sees isn't an `MCPTool` at all: `BaseAgent` always app
 
 ## Built-in tool catalog
 
-Import a whole domain's tools at once (e.g. `FsTools()`), or import individual tools by name. Every domain also exports a `*Interaction` `EventEmitter` for subscribing to that domain's live progress events (e.g. `FsInteraction`, `BashInteraction`).
+Import a whole domain's tools at once (e.g. `FsTools()`), or import individual tools by name.
 
 ### Filesystem — `FsTools()`
 
@@ -90,7 +123,7 @@ Drives a real headless browser session.
 | `BrowserNetworkTool` | Read captured network request/response activity. |
 | `BrowserNetworkStatusTool` | Check whether the page currently has in-flight network activity. |
 | `BrowserInjectTool` | Evaluate arbitrary JS in the page and return the result. |
-| `BrowserScreenshotTool` | Capture a screenshot; can be described by the `image` provider instead of passed raw to the main model. |
+| `BrowserScreenshotTool` | Capture a screenshot and return a text description of it (via an `image-describer` provider — see [Provider roles](./providers.md#provider-roles)). |
 
 ### Todo lists — `TodoTools()`
 
@@ -126,7 +159,7 @@ Backs the `PlannerSkill` (see [Skills](./skills.md)), but usable standalone.
 |---|---|
 | `GetCurrentTimeTool` | Get the current date/time (ISO string, unix timestamp, timezone). |
 | `DelayTool` | Wait a given number of milliseconds (max 60000ms) before continuing. |
-| `ReadImageTool` | Read an image file off disk and hand it to the agent as an image tool-output — same handling as `BrowserScreenshotTool` (raw bytes to the model, or described by the image provider first, depending on config). |
+| `ReadImageTool` | Read an image file off disk and return a text description of it — same handling as `BrowserScreenshotTool`. |
 
 ### Multi-agent — `AgentTools(availableAgents, options?)` *(experimental)*
 

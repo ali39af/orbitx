@@ -11,38 +11,30 @@ export class SimpleAgent extends BaseAgent {
     constructor({
         aiProvider,
         instruction = "",
+        safetyPolicies = "",
         tools = [],
         skills = [],
         maxMemorizeToken = 16000,
         initData = {
-            memory: "",
-            messagesFull: [],
-            fullInputMissTokens: 0,
-            fullInputHitTokens: 0,
-            fullOutputTokens: 0,
+            compactMemory: "",
+            retiredMessages: [],
             messagesCompact: [],
-            currentInputMissTokens: 0,
-            currentInputHitTokens: 0,
-            currentOutputTokens: 0,
-        }
+        },
+        features
     }: {
         instruction: string;
-        tools?: MCPTool<any>[];
+        safetyPolicies?: string;
+        tools?: MCPTool[];
         aiProvider: AIProvider;
         skills?: Skill[];
         maxMemorizeToken?: number;
         initData?: {
-            memory: string;
-            messagesFull: Message[];
-            fullInputMissTokens: number;
-            fullInputHitTokens: number;
-            fullOutputTokens: number;
+            compactMemory: string;
+            retiredMessages: Message[];
             messagesCompact: Message[];
-            currentInputMissTokens: number;
-            currentInputHitTokens: number;
-            currentOutputTokens: number;
-            imageInputMissTokens?: number;
-            imageOutputTokens?: number;
+        };
+        features?: {
+            executeProviderFromMCPTool?: boolean;
         }
     }) {
         const conn = new MCPConnection();
@@ -59,11 +51,13 @@ export class SimpleAgent extends BaseAgent {
         super({
             aiProvider,
             instruction,
+            safetyPolicies,
             mcpClient,
             allowedTools: tools,
             skills,
             maxMemorizeToken,
             initData,
+            features,
         });
     }
 }

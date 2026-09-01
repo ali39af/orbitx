@@ -6,12 +6,11 @@ Flat index of every public export from `orbitx` (see `src/index.ts`), grouped by
 
 - `AIProvider` (abstract base class)
 - `OpenAIProvider`, `AnthropicProvider`, `DeepSeekProvider`, `OllamaProvider`
-- `resolveAgentProviders()`
-- Types: `AgentProviderRole`, `AgentProviderEntry`, `AgentProvidersInput`, `ResolvedAgentProviders`
-- Types: `ChatResponse`, `Message`, `StreamCallback`, `ToolSchema`, `ToolCallRequest`, `MessageContentPart`, `ProviderCapabilities`
+- `resolveAgentProviders()`, `ProviderRegistry`
+- Types: `AgentProviderEntry`, `AgentProvidersInput`
+- Types: `ChatResponse`, `Message`, `MessageUsage`, `MessageUsageTokens`, `MessageUsageCost`, `StreamCallback`, `ToolSchema`, `ToolCallRequest`, `MessageContentPart`, `ProviderCapabilities`, `ProviderType` — see [Providers](./providers.md#provider-roles)
 - `resolveThinkEffortLevel()`, `clampThinkEffort()` — the universal 0-1 `thinkEffort` → provider-native-level mapping helpers; see [Providers](./providers.md#think-effort)
 - Type: `ThinkEffortLevel`
-- `ImageDescriber`, type `ImageDescription` — used internally by `BaseAgent` to describe image tool output via the `image` provider role; exported for direct use if you want to describe an image outside the agent loop. `describe()` returns an `ImageDescription` (`{ description, inputTokens, outputTokens }`), not a bare string.
 - `toOpenAIFunctionTools()` — translates a `ToolSchema[]` into OpenAI's function-calling format; exported for building custom providers.
 
 ## Agents — see [Agents](./agents.md)
@@ -23,21 +22,21 @@ Flat index of every public export from `orbitx` (see `src/index.ts`), grouped by
 
 ## Tools — see [Tools](./tools.md)
 
-- `MCPTool`, `MCPCustomClass`, `generateRefId()`, `normalizeToolOutput()`
+- `MCPTool`, `generateRefId()`, `normalizeToolOutput()`
 - Types: `MCP`, `MCPToolOutput`
 
-Built-in tool factories, grouped by domain (each domain also exports a `*Tools()` array and a `*Interaction` EventEmitter):
+Built-in tool factories, grouped by domain (each domain also exports a `*Tools()` array):
 
 | Domain | Exports |
 |---|---|
-| Filesystem | `FsReadFileTool`, `FsWriteFileTool`, `FsEditFileTool`, `FsListDirTool`, `FsCreateDirTool`, `FsDeleteTool`, `FsMoveTool`, `FsStatTool`, `FsTools`, `FsInteraction`, type `FsEvent` |
-| Bash | `BashRunTool`, `BashWaitTool`, `BashLogsTool`, `BashListTool`, `BashWriteInputTool`, `BashTerminateTool`, `BashTools`, `BashInteraction`, type `BashEvent` |
-| Browser | `BrowserCreateSessionTool`, `BrowserRemoveSessionTool`, `BrowserGetSessionsTool`, `BrowserNavigateTool`, `BrowserConsoleTool`, `BrowserInjectTool`, `BrowserReadTool`, `BrowserClickTool`, `BrowserFillTool`, `BrowserScrollInfoTool`, `BrowserScrollTool`, `BrowserNetworkStatusTool`, `BrowserNetworkTool`, `BrowserSubmitFormTool`, `BrowserScreenshotTool`, `BrowserTools`, `BrowserInteraction`, type `BrowserEvent` |
-| Todo | `TodoCreateListTool`, `TodoRemoveListTool`, `TodoGetListsTool`, `TodoGetListTool`, `TodoCreateTaskTool`, `TodoRemoveTaskTool`, `TodoCheckTaskTool`, `TodoTools`, `TodoInteraction`, types `TodoTask`, `TodoList`, `TodoEvent` |
-| Present | `PresentAddTool`, `PresentClearTool`, `PresentGetListTool`, `PresentTools`, `getPresentFolder()`, `PresentInteraction`, type `PresentEvent` |
-| Question/Answer | `QuestionAnswerTool`, `QuestionAnswerTools`, `QuestionAnswerInteraction`, type `QuestionAnswerEvent` |
+| Filesystem | `FsReadFileTool`, `FsWriteFileTool`, `FsEditFileTool`, `FsListDirTool`, `FsCreateDirTool`, `FsDeleteTool`, `FsMoveTool`, `FsStatTool`, `FsTools` |
+| Bash | `BashRunTool`, `BashWaitTool`, `BashLogsTool`, `BashListTool`, `BashWriteInputTool`, `BashTerminateTool`, `BashTools` |
+| Browser | `BrowserCreateSessionTool`, `BrowserRemoveSessionTool`, `BrowserGetSessionsTool`, `BrowserNavigateTool`, `BrowserConsoleTool`, `BrowserInjectTool`, `BrowserReadTool`, `BrowserClickTool`, `BrowserFillTool`, `BrowserScrollInfoTool`, `BrowserScrollTool`, `BrowserNetworkStatusTool`, `BrowserNetworkTool`, `BrowserSubmitFormTool`, `BrowserScreenshotTool`, `BrowserTools` |
+| Todo | `TodoCreateListTool`, `TodoRemoveListTool`, `TodoGetListsTool`, `TodoGetListTool`, `TodoCreateTaskTool`, `TodoRemoveTaskTool`, `TodoCheckTaskTool`, `TodoTools`, types `TodoTask`, `TodoList` |
+| Present | `PresentAddTool`, `PresentClearTool`, `PresentGetListTool`, `PresentTools`, `getPresentFolder()` |
+| Question/Answer | `QuestionAnswerTool`, `QuestionAnswerTools` |
 | Utility | `GetCurrentTimeTool`, `DelayTool`, `ReadImageTool`, `UtilTools` |
-| Multi-agent *(experimental)* | `AgentTools(availableAgents, options?)`, `AgentListTool`, `AgentHireTool`, `AgentPromptTool`, `AgentReportTool`, `AgentRegistry`, `AgentInteraction`, type `AgentInfo`, type `AgentEvent`, type `AgentToolsOptions` — see [Agents](./agents.md#multi-agent-workeragent-experimental) |
+| Multi-agent *(experimental)* | `AgentTools(availableAgents, options?)`, `AgentListTool`, `AgentHireTool`, `AgentPromptTool`, `AgentReportTool`, `AgentRegistry`, type `AgentInfo`, type `AgentToolsOptions` — see [Agents](./agents.md#multi-agent-workeragent-experimental) |
 
 ## Skills — see [Skills](./skills.md)
 

@@ -1,10 +1,9 @@
 import { writeFile, mkdir } from "fs/promises";
 import { dirname } from "path";
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import { FsInteraction } from "./interaction.js";
 import { resolvePath } from "./utils.js";
 
-export const FsWriteFileTool = () => new MCPTool<FsInteraction>({
+export const FsWriteFileTool = () => new MCPTool({
     name: "fs-write-file",
     description:
         "write text content to a file, overwriting it if it already exists (or creating it, along with any missing parent directories, if it doesn't). USE WITH CAUTION: this permanently overwrites existing file content with no undo.",
@@ -29,12 +28,11 @@ export const FsWriteFileTool = () => new MCPTool<FsInteraction>({
             default: true,
         },
     ],
-    customClass: new FsInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: MCP,
-        customClass?: FsInteraction
+        _toolCallId?: string,
+        _mcp?: MCP
     ): Promise<any> => {
         const { path, content, createDirs = true } = inputs;
 
@@ -43,8 +41,6 @@ export const FsWriteFileTool = () => new MCPTool<FsInteraction>({
         }
 
         const fullPath = resolvePath(path);
-
-        customClass?.emitFsEvent({ type: "writing", path: fullPath });
 
         if (createDirs) {
             await mkdir(dirname(fullPath), { recursive: true });

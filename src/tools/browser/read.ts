@@ -1,9 +1,8 @@
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import { BrowserInteraction } from "./interaction.js";
 import { getSession } from "./session-manager.js";
 import { readPage } from "./read-page.js";
 
-export const BrowserReadTool = () => new MCPTool<BrowserInteraction>({
+export const BrowserReadTool = () => new MCPTool({
     name: "browser-read",
     description:
         "read the current page as a readable text outline (headings, paragraphs, tables, links, inputs, buttons, images, and forms), assigning a ref id to every clickable/fillable element for use with browser-click / browser-fill. " +
@@ -38,20 +37,17 @@ export const BrowserReadTool = () => new MCPTool<BrowserInteraction>({
             required: false,
         },
     ],
-    customClass: new BrowserInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        mcp?: MCP,
-        customClass?: BrowserInteraction
+        _toolCallId?: string,
+        mcp?: MCP
     ): Promise<any> => {
         const { sessionId, offsetLine = 0, limitLine = 200, continueRef } = inputs;
 
         if (!sessionId || typeof sessionId !== "string") {
             throw new Error("sessionId must be a non-empty string");
         }
-
-        customClass?.emitBrowserEvent({ type: "reading", sessionId });
 
         const session = getSession(sessionId);
         const result = await readPage(mcp, session, offsetLine, limitLine, continueRef);

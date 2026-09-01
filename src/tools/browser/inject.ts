@@ -1,10 +1,9 @@
 import { MCPTool } from "../../core/mcp.js";
-import { BrowserInteraction } from "./interaction.js";
 import { getSession } from "./session-manager.js";
 
 const OUTPUT_CAP = 5000;
 
-export const BrowserInjectTool = () => new MCPTool<BrowserInteraction>({
+export const BrowserInjectTool = () => new MCPTool({
     name: "browser-inject",
     description: "evaluate arbitrary JavaScript inside a browser session's page and return its result (capped at 5000 characters)",
     inputs: [
@@ -21,12 +20,11 @@ export const BrowserInjectTool = () => new MCPTool<BrowserInteraction>({
             required: true,
         },
     ],
-    customClass: new BrowserInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: any,
-        customClass?: BrowserInteraction
+        _toolCallId?: string,
+        _mcp?: any
     ): Promise<any> => {
         const { sessionId, eval: code } = inputs;
 
@@ -37,8 +35,6 @@ export const BrowserInjectTool = () => new MCPTool<BrowserInteraction>({
         if (!code || typeof code !== "string") {
             throw new Error("eval must be a non-empty string");
         }
-
-        customClass?.emitBrowserEvent({ type: "injecting", sessionId });
 
         const session = getSession(sessionId);
 

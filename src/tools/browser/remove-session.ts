@@ -1,8 +1,7 @@
 import { MCPTool } from "../../core/mcp.js";
-import { BrowserInteraction } from "./interaction.js";
 import { removeSession } from "./session-manager.js";
 
-export const BrowserRemoveSessionTool = () => new MCPTool<BrowserInteraction>({
+export const BrowserRemoveSessionTool = () => new MCPTool({
     name: "browser-remove-session",
     description: "close and remove a browser session",
     inputs: [
@@ -13,12 +12,11 @@ export const BrowserRemoveSessionTool = () => new MCPTool<BrowserInteraction>({
             required: true,
         },
     ],
-    customClass: new BrowserInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: any,
-        customClass?: BrowserInteraction
+        _toolCallId?: string,
+        _mcp?: any
     ): Promise<any> => {
         const { sessionId } = inputs;
 
@@ -27,8 +25,6 @@ export const BrowserRemoveSessionTool = () => new MCPTool<BrowserInteraction>({
         }
 
         await removeSession(sessionId);
-
-        customClass?.emitBrowserEvent({ type: "session-removed", sessionId });
 
         return {
             message: "success",

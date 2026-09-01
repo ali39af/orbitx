@@ -1,7 +1,6 @@
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import QuestionAnswerInteraction from "./interaction.js";
 
-export const QuestionAnswerTool = () => new MCPTool<QuestionAnswerInteraction>({
+export const QuestionAnswerTool = () => new MCPTool({
     name: "question-answer",
     description: "when you want ask some questions before continue doing task",
     inputs: [
@@ -13,16 +12,13 @@ export const QuestionAnswerTool = () => new MCPTool<QuestionAnswerInteraction>({
         },
     ],
     stopIterationAfterUsingThisTool: true,
-    customClass: new QuestionAnswerInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: MCP,
-        customClass?: QuestionAnswerInteraction
+        _toolCallId?: string,
+        _mcp?: MCP
     ): Promise<any> => {
         
-        customClass?.emitQuestionAnswerEvent({ type: "question-answer" });
-
         return {
             message: "success",
         };

@@ -1,9 +1,8 @@
 import { MCPTool } from "../../core/mcp.js";
-import { BrowserInteraction } from "./interaction.js";
 import { getSession } from "./session-manager.js";
 import { resolveRef, resolveFormForRef } from "./read-page.js";
 
-export const BrowserFillTool = () => new MCPTool<BrowserInteraction>({
+export const BrowserFillTool = () => new MCPTool({
     name: "browser-fill",
     description:
         "type a value into a fillable element on the page (a ref id previously returned by browser-read, marked [FILLABLE]). " +
@@ -35,12 +34,11 @@ export const BrowserFillTool = () => new MCPTool<BrowserInteraction>({
             default: false,
         },
     ],
-    customClass: new BrowserInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: any,
-        customClass?: BrowserInteraction
+        _toolCallId?: string,
+        _mcp?: any
     ): Promise<any> => {
         const { sessionId, ref, value, submitOnEnter = false } = inputs;
 
@@ -55,8 +53,6 @@ export const BrowserFillTool = () => new MCPTool<BrowserInteraction>({
         if (typeof value !== "string") {
             throw new Error("value must be a string");
         }
-
-        customClass?.emitBrowserEvent({ type: "filling", sessionId, ref });
 
         const session = getSession(sessionId);
         const element = await resolveRef(session.page, ref);

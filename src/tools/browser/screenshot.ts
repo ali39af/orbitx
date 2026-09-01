@@ -1,13 +1,11 @@
-import { MCPTool } from "../../core/mcp.js";
-import { BrowserInteraction } from "./interaction.js";
+import { MCPTool, type MCP } from "../../core/mcp.js";
 import { getSession } from "./session-manager.js";
 
-export const BrowserScreenshotTool = () => new MCPTool<BrowserInteraction>({
+export const BrowserScreenshotTool = () => new MCPTool({
     name: "browser-screenshot",
     description:
-        "capture a screenshot of the current page in a browser session. " +
-        "returns an image tool-output — depending on how the agent is configured, the raw image may be handed directly to the model, or first described by a separate image-capable AI so the main conversation doesn't have to carry image bytes. " +
-        "use `focusHint` to tell that description step what you actually care about (e.g. 'look for any red error banner or visually broken layout'), so the resulting description is useful for your task instead of a generic caption.",
+        "capture a screenshot of the current page in a browser session and get back a text description of it. " +
+        "use `focusHint` to tell the description step what you actually care about (e.g. 'look for any red error banner or visually broken layout'), so the resulting description is useful for your task instead of a generic caption.",
     inputs: [
         {
             name: "sessionId",
@@ -29,12 +27,11 @@ export const BrowserScreenshotTool = () => new MCPTool<BrowserInteraction>({
             required: false,
         },
     ],
-    customClass: new BrowserInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: any,
-        customClass?: BrowserInteraction
+        toolCallId?: string,
+        mcp?: MCP
     ): Promise<any> => {
         const { sessionId, fullPage = false, focusHint } = inputs;
 
@@ -42,19 +39,25 @@ export const BrowserScreenshotTool = () => new MCPTool<BrowserInteraction>({
             throw new Error("sessionId must be a non-empty string");
         }
 
-        customClass?.emitBrowserEvent({ type: "screenshotting", sessionId });
-
         const session = getSession(sessionId);
         const image = await session.page.screenshot({ encoding: "base64", fullPage, type: "png" });
 
-        return {
-            type: "image",
-            output: {
-                image,
-                mimeType: "image/png",
-                ...(focusHint ? { focusHint } : {}),
-            },
-        };
+        if (!mcp || !toolCallId) {
+            throw new Error("browser-screenshot requires an MCP context");
+        }
+
+        const instruction = focusHint
+            ? `Describe this screenshot concisely for another AI agent that cannot see it. Focus specifically on: ${focusHint}`
+            : "Describe this screenshot concisely for another AI agent that cannot see it. Mention layout, visible text, colors, and anything that looks unusual or broken.";
+
+        const { output } = await mcp.executeProvider(toolCallId, "image-describer", {
+            parts: [
+                { type: "text", text: instruction },
+                { type: "image", image, mimeType: "image/png" },
+            ],
+        });
+
+        return { description: output.content };
     },
 });
 

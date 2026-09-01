@@ -1,9 +1,8 @@
 import { rm, stat } from "fs/promises";
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import { FsInteraction } from "./interaction.js";
 import { resolvePath } from "./utils.js";
 
-export const FsDeleteTool = () => new MCPTool<FsInteraction>({
+export const FsDeleteTool = () => new MCPTool({
     name: "fs-delete",
     description:
         "permanently delete a file or a directory (with all of its contents when recursive is true). USE WITH CAUTION: there is no undo.",
@@ -22,18 +21,15 @@ export const FsDeleteTool = () => new MCPTool<FsInteraction>({
             default: false,
         },
     ],
-    customClass: new FsInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: MCP,
-        customClass?: FsInteraction
+        _toolCallId?: string,
+        _mcp?: MCP
     ): Promise<any> => {
         const { path, recursive = false } = inputs;
 
         const fullPath = resolvePath(path);
-
-        customClass?.emitFsEvent({ type: "deleting", path: fullPath });
 
         let wasDirectory = false;
         try {

@@ -1,9 +1,8 @@
 import { readFile, writeFile } from "fs/promises";
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import { FsInteraction } from "./interaction.js";
 import { resolvePath, toLines } from "./utils.js";
 
-export const FsEditFileTool = () => new MCPTool<FsInteraction>({
+export const FsEditFileTool = () => new MCPTool({
     name: "fs-edit-file",
     description:
         "replace a specific line range in an existing file without rewriting the whole file. lines are 1-indexed (line 1 is the first line of the file, matching fs-read-file); the range [offsetLine, offsetLine+limitLine) 1-indexed lines is replaced entirely by `content` (use limitLine 0 to insert before offsetLine without deleting anything; use offsetLine totalLines+1 to append at end of file). read the file first (fs-read-file) to get accurate line numbers, since another edit may have shifted them.",
@@ -33,12 +32,11 @@ export const FsEditFileTool = () => new MCPTool<FsInteraction>({
             required: true,
         },
     ],
-    customClass: new FsInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: MCP,
-        customClass?: FsInteraction
+        _toolCallId?: string,
+        _mcp?: MCP
     ): Promise<any> => {
         const { path, offsetLine, limitLine, content } = inputs;
 
@@ -53,8 +51,6 @@ export const FsEditFileTool = () => new MCPTool<FsInteraction>({
         }
 
         const fullPath = resolvePath(path);
-
-        customClass?.emitFsEvent({ type: "editing", path: fullPath });
 
         let raw: string;
         try {

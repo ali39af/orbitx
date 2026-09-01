@@ -1,8 +1,7 @@
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import { BashInteraction } from "./interaction.js";
 import { getProcess } from "./process-manager.js";
 
-export const BashWaitTool = () => new MCPTool<BashInteraction>({
+export const BashWaitTool = () => new MCPTool({
     name: "bash-wait",
     description:
         "wait up to waitMs for a previously started process to finish, then return its status and the last N lines of output (works the same as the initial wait in bash-run, useful for polling a long-running process again)",
@@ -28,12 +27,11 @@ export const BashWaitTool = () => new MCPTool<BashInteraction>({
             default: 20,
         },
     ],
-    customClass: new BashInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: MCP,
-        customClass?: BashInteraction
+        _toolCallId?: string,
+        _mcp?: MCP
     ): Promise<any> => {
         const { processId, waitMs = 15000, tailLines = 20 } = inputs;
 
@@ -43,13 +41,7 @@ export const BashWaitTool = () => new MCPTool<BashInteraction>({
 
         const proc = getProcess(processId);
 
-        customClass?.emitBashEvent({ type: "waiting", processId });
-
         await proc.waitFor(waitMs);
-
-        if (proc.status !== "running") {
-            customClass?.emitBashEvent({ type: "process-exited", processId, exitCode: proc.exitCode });
-        }
 
         return {
             processId: proc.id,

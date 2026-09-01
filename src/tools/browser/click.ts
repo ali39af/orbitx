@@ -1,9 +1,8 @@
 import { MCPTool } from "../../core/mcp.js";
-import { BrowserInteraction } from "./interaction.js";
 import { getSession } from "./session-manager.js";
 import { resolveRef } from "./read-page.js";
 
-export const BrowserClickTool = () => new MCPTool<BrowserInteraction>({
+export const BrowserClickTool = () => new MCPTool({
     name: "browser-click",
     description: "click a clickable element on the page (a ref id previously returned by browser-read, marked [CLICKABLE])",
     inputs: [
@@ -20,12 +19,11 @@ export const BrowserClickTool = () => new MCPTool<BrowserInteraction>({
             required: true,
         },
     ],
-    customClass: new BrowserInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: any,
-        customClass?: BrowserInteraction
+        _toolCallId?: string,
+        _mcp?: any
     ): Promise<any> => {
         const { sessionId, ref } = inputs;
 
@@ -36,8 +34,6 @@ export const BrowserClickTool = () => new MCPTool<BrowserInteraction>({
         if (!ref || typeof ref !== "string") {
             throw new Error("ref must be a non-empty string");
         }
-
-        customClass?.emitBrowserEvent({ type: "clicking", sessionId, ref });
 
         const session = getSession(sessionId);
         const element = await resolveRef(session.page, ref);

@@ -1,8 +1,7 @@
 import { MCPTool } from "../../core/mcp.js";
-import { BrowserInteraction } from "./interaction.js";
 import { getSession } from "./session-manager.js";
 
-export const BrowserNavigateTool = () => new MCPTool<BrowserInteraction>({
+export const BrowserNavigateTool = () => new MCPTool({
     name: "browser-navigate",
     description: "navigate an existing browser session to a new url",
     inputs: [
@@ -19,12 +18,11 @@ export const BrowserNavigateTool = () => new MCPTool<BrowserInteraction>({
             required: true,
         },
     ],
-    customClass: new BrowserInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: any,
-        customClass?: BrowserInteraction
+        _toolCallId?: string,
+        _mcp?: any
     ): Promise<any> => {
         const { sessionId, url } = inputs;
 
@@ -35,8 +33,6 @@ export const BrowserNavigateTool = () => new MCPTool<BrowserInteraction>({
         if (!url || typeof url !== "string") {
             throw new Error("url must be a non-empty string");
         }
-
-        customClass?.emitBrowserEvent({ type: "navigating", sessionId, url });
 
         const session = getSession(sessionId);
         await session.page.goto(url, { waitUntil: "domcontentloaded" });

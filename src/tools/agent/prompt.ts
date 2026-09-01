@@ -1,8 +1,7 @@
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import { AgentInteraction } from "./interaction.js";
 import type AgentRegistry from "./registry.js";
 
-export const AgentPromptTool = (registry: AgentRegistry) => new MCPTool<AgentInteraction>({
+export const AgentPromptTool = (registry: AgentRegistry) => new MCPTool({
     name: "agent-prompt",
     description: "send a prompt to a hired worker agent and wait for its response. The worker runs its own full turn (its own reasoning, its own tools) and either calls agent-report to hand back a result, or just stops on its own — either way this returns once it's done. You can call this again later on the same agent to continue the conversation (it remembers everything from earlier prompts), or move on and never call it again if its report says the work is finished.",
     inputs: [
@@ -19,12 +18,11 @@ export const AgentPromptTool = (registry: AgentRegistry) => new MCPTool<AgentInt
             required: true,
         },
     ],
-    customClass: new AgentInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: MCP,
-        customClass?: AgentInteraction
+        _toolCallId?: string,
+        _mcp?: MCP
     ): Promise<any> => {
         const { name, prompt } = inputs;
 
@@ -43,14 +41,20 @@ export const AgentPromptTool = (registry: AgentRegistry) => new MCPTool<AgentInt
             throw new Error(`worker agent "${name}" is not hired yet — call agent-hire first.`);
         }
 
-        customClass?.emitAgentEvent({ type: "prompted", name, prompt });
-
-        const beforeLength = agent.getCurrentAgentStates().messagesFull.length;
+        // retiredMessages and messagesCompact are disjoint (retiredMessages holds
+        // only what's already been retired by a compact_memory call) —
+        // concatenated, in that order, they're the complete chronological
+        // history. A mid-turn compaction just re-partitions that same sequence
+        // between the two arrays without changing its order or length, so
+        // diffing total count across both arrays stays valid even if one happens.
+        const statesBefore = agent.getCurrentAgentStates();
+        const beforeLength = statesBefore.retiredMessages.length + statesBefore.messagesCompact.length;
         await agent.run(prompt);
         // Only look at messages this specific call produced — otherwise a
         // worker that answers in plain text (no fresh agent-report) could
         // surface a stale report left over from an earlier prompt.
-        const newMessages = agent.getCurrentAgentStates().messagesFull.slice(beforeLength);
+        const statesAfter = agent.getCurrentAgentStates();
+        const newMessages = [...statesAfter.retiredMessages, ...statesAfter.messagesCompact].slice(beforeLength);
 
         let report: string | undefined;
         let reported = false;
@@ -79,8 +83,6 @@ export const AgentPromptTool = (registry: AgentRegistry) => new MCPTool<AgentInt
         }
 
         report ??= "(worker agent produced no output this turn)";
-
-        customClass?.emitAgentEvent({ type: "reported", name, reported, report });
 
         return { report, reported };
     },

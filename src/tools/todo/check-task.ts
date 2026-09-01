@@ -1,8 +1,7 @@
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import { TodoInteraction } from "./interaction.js";
 import { getTask, setTask } from "./storage.js";
 
-export const TodoCheckTaskTool = () => new MCPTool<TodoInteraction>({
+export const TodoCheckTaskTool = () => new MCPTool({
     name: "todo-check-task",
     description: "set the checked state of one or more tasks",
     inputs: [
@@ -19,12 +18,11 @@ export const TodoCheckTaskTool = () => new MCPTool<TodoInteraction>({
             required: true,
         },
     ],
-    customClass: new TodoInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        mcp?: MCP,
-        customClass?: TodoInteraction
+        _toolCallId?: string,
+        mcp?: MCP
     ): Promise<any> => {
         const { tasks, check } = inputs;
 
@@ -49,8 +47,6 @@ export const TodoCheckTaskTool = () => new MCPTool<TodoInteraction>({
             await setTask(mcp, task);
             updated.push(taskId);
         }
-
-        customClass?.emitTodoEvent({ type: "task-checked", taskIds: updated, checked: check });
 
         return {
             message: "success",

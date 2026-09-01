@@ -29,6 +29,40 @@ export type MessageContentPart =
     | { type: "text"; text: string }
     | { type: "image"; image: string /* base64, no data: prefix required */; mimeType?: string };
 
+export type ProviderType =
+    | "main"
+    | "image-describer"
+    | "image-generation"
+    | "image-editing"
+    | "video-describer"
+    | "video-generation"
+    | "video-editing"
+    | "audio-describer"
+    | "audio-generation"
+    | "audio-design"
+    | "audio-clone"
+    | "3d-model-generator"
+    | "llm-low"
+    | "llm-medium"
+    | "llm-high"
+    | (string & {});
+
+export interface MessageUsageTokens {
+    type: ProviderType;
+    unit: "tokens";
+    inputMissTokens: number;
+    inputCacheTokens: number;
+    outputTokens: number;
+}
+
+export interface MessageUsageCost {
+    type: ProviderType;
+    unit: "cost";
+    cost: number;
+}
+
+export type MessageUsage = MessageUsageTokens | MessageUsageCost;
+
 export interface Message {
     role: "user" | "system" | "assistant" | "tool";
     content?: string;
@@ -50,12 +84,18 @@ export interface Message {
      * untouched; only the provider that produced it interprets it.
      */
     providerThinking?: any[];
+    timestamp?: number;
+    /** True on messages BaseAgent injects itself rather than ones a human or the model produced (e.g. the forced-compaction nudge) — a hint for UI code to filter out of what's shown to an end user. Defaults to false/absent; purely a display hint, not sent to any provider. */
+    hidden?: boolean;
+    usage?: MessageUsage[];
 }
 
 export interface ChatResponse {
     content: string;
-    inputTokens: number;
-    outputTokens: number;
+    inputMissTokens?: number;
+    inputCacheTokens?: number;
+    outputTokens?: number;
+    cost?: number;
     /** Native tool calls requested by the model, when the provider supports native tool-calling and tools were supplied. */
     toolCalls?: ToolCallRequest[];
     /** Accumulated reasoning/thinking text produced this turn, when thinking was requested and the provider can surface it. See `Message.thinking`. */
@@ -88,6 +128,13 @@ export type StreamCallback = (chunk: {
     toolName?: string;
     /** Reasoning/thinking text delta for this chunk, mirroring `content` — present only while the model is thinking, absent (or empty) once it moves on to its actual answer. Only ever set on non-`done` assistant chunks. Never set unless the provider was configured with `thinkEffort` and can stream thinking (see `ProviderCapabilities.supportsThinking`); when a thinking chunk is emitted, `content` on that same chunk is empty. */
     thinking?: string;
+    /** Mirrors `Message.hidden` — true on chunks for a message BaseAgent injected itself (e.g. the forced-compaction nudge), so a live-streaming UI can filter it out the same way it would filter the persisted Message. */
+    hidden?: boolean;
+    usage?: {
+        inputMissTokens: number;
+        inputCacheTokens: number;
+        outputTokens: number;
+    };
 }) => Promise<void> | void;
 
 /**
@@ -104,10 +151,32 @@ export interface ProviderCapabilities {
     supportsImages: boolean;
     /** The model's total context window, in tokens. Used to derive a safe default for when to trigger a memory-compaction event, without needing a hardcoded per-agent constant. */
     contextWindow: number;
+    /** The model's maximum output tokens per response, when known. Not yet enforced anywhere — reserved for the agent loop to size/guard its own output budgeting in a future release. Undefined where not confirmed for a given provider/model. */
+    maxOutputTokens?: number;
     /** Fraction of the context window (0-1) that's safe to fill before compacting; leaves headroom for the system prompt, tool schema, and the model's own output. Defaults applied by callers if not specified. */
     safeUsageRatio?: number;
     /** Whether this provider can surface the model's reasoning/thinking text (streamed via the `thinking` chunk field, and returned as `ChatResponse.thinking`) when constructed with `thinkEffort`. A provider may still accept/honor `thinkEffort` server-side (e.g. it changes response quality/latency) while reporting `false` here, if its API never exposes the reasoning text itself. */
     supportsThinking?: boolean;
+    /** Whether this provider/model accepts video content in messages. */
+    supportsVideo?: boolean;
+    /** Whether this provider/model accepts audio content in messages. */
+    supportsAudio?: boolean;
+    /** Whether this provider/model can generate new images. */
+    supportsImageGeneration?: boolean;
+    /** Whether this provider/model can edit an existing image. */
+    supportsImageEditing?: boolean;
+    /** Whether this provider/model can generate new video. */
+    supportsVideoGeneration?: boolean;
+    /** Whether this provider/model can edit existing video. */
+    supportsVideoEditing?: boolean;
+    /** Whether this provider/model can generate new audio (speech, music, sound effects). */
+    supportsAudioGeneration?: boolean;
+    /** Whether this provider/model can design/produce sound effects or soundscapes. */
+    supportsAudioDesign?: boolean;
+    /** Whether this provider/model can clone a voice from a reference sample. */
+    supportsAudioClone?: boolean;
+    /** Whether this provider/model can generate a new 3D model. */
+    supports3DModelGeneration?: boolean;
 }
 
 export abstract class AIProvider {
@@ -128,6 +197,8 @@ export abstract class AIProvider {
 
     /** Describe what this provider/model can do — used by BaseAgent to pick the native-tools vs. legacy-JSON path and to size the memory-compaction threshold. */
     abstract getCapabilities(): ProviderCapabilities;
+
+    abstract setOption(key: string, value: unknown): void;
 }
 
 export default AIProvider;

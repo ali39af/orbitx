@@ -27,7 +27,7 @@ export const BashLogsTool = () => new MCPTool({
             default: 200,
         },
     ],
-    execute: async (_envID: string, inputs: Record<string, any>, _mcp?: MCP): Promise<any> => {
+    execute: async (_envID: string, inputs: Record<string, any>, _toolCallId?: string, _mcp?: MCP): Promise<any> => {
         const { processId, offsetLine = 0, limitLine = 200 } = inputs;
 
         if (!processId || typeof processId !== "string") {

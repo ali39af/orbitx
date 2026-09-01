@@ -5,7 +5,7 @@ export const BashListTool = () => new MCPTool({
     name: "bash-list",
     description: "list every bash process launched so far (running or finished) with its status, so a still-running one can be checked on or terminated",
     inputs: [],
-    execute: async (_envID: string, _inputs: Record<string, any>, _mcp?: MCP): Promise<any> => {
+    execute: async (_envID: string, _inputs: Record<string, any>, _toolCallId?: string, _mcp?: MCP): Promise<any> => {
         const processes = listProcesses().map((p) => ({
             processId: p.id,
             command: p.command,

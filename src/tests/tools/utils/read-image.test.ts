@@ -10,6 +10,7 @@ describe("utils/read-image", () => {
     let mcpClient: MCPClient;
     let mcpServer: MCPServer;
     let tmpDir: string;
+    let executeProviderCalls: { toolCallId: string; type: string; input: Record<string, any> }[];
 
     // smallest possible valid PNG (1x1 transparent pixel)
     const PNG_BASE64 =
@@ -24,6 +25,13 @@ describe("utils/read-image", () => {
         mcpClient = new MCPClient("1234", mcpConnection);
         mcpServer = new MCPServer(mcpConnection);
         mcpServer.registerTool(ReadImageTool());
+
+        executeProviderCalls = [];
+        mcpClient.setExecuteProviderHandler(async (toolCallId, type, input) => {
+            executeProviderCalls.push({ toolCallId, type, input });
+            const instructionPart = input.parts?.find((p: any) => p.type === "text");
+            return { output: { content: instructionPart?.text ?? "" } };
+        });
     });
 
     after(async () => {
@@ -31,36 +39,43 @@ describe("utils/read-image", () => {
         rmSync(tmpDir, { recursive: true, force: true });
     });
 
-    // Like BrowserScreenshotTool, the image content only gets interpreted
-    // further downstream by an AI vision model (see
-    // BaseAgent#resolveToolOutputForModel); none of that runs here, so this only
-    // confirms the tool itself returns an image output, not anything about what
-    // the image shows.
-    test("ReadImageTool: reads a png file and returns an image tool-output with the right mimeType", async () => {
+    test("ReadImageTool: sends the image bytes to the image-describer provider and returns its description", async () => {
+        executeProviderCalls.length = 0;
         const path = join(tmpDir, "pixel.png");
-        const result = await mcpClient.callTool("read-image", { path });
+        const result = await mcpClient.callTool("read-image", { path }, "tc-1");
 
-        assert.strictEqual(result.type, "image");
-        assert.strictEqual(result.output.mimeType, "image/png");
-        assert.strictEqual(typeof result.output.image, "string");
-        assert.ok(result.output.image.length > 0, "image should not be empty");
+        assert.strictEqual(executeProviderCalls.length, 1);
+        const { type, input } = executeProviderCalls[0];
+        assert.strictEqual(type, "image-describer");
+
+        const imagePart = input.parts.find((p: any) => p.type === "image");
+        assert.ok(imagePart, "provider input should include an image part");
+        assert.strictEqual(imagePart.mimeType, "image/png");
+        assert.strictEqual(typeof imagePart.image, "string");
+        assert.ok(imagePart.image.length > 0, "image should not be empty");
+
+        assert.strictEqual(typeof result.output.description, "string");
+        assert.ok(result.output.description.length > 0, "description should not be empty");
     });
 
-    test("ReadImageTool: includes focusHint in the output only when provided", async () => {
+    test("ReadImageTool: includes focusHint in the instruction sent to the provider only when provided", async () => {
+        executeProviderCalls.length = 0;
         const path = join(tmpDir, "pixel.png");
 
-        const withHint = await mcpClient.callTool("read-image", { path, focusHint: "check the color" });
-        assert.strictEqual(withHint.output.focusHint, "check the color");
+        const withHint = await mcpClient.callTool("read-image", { path, focusHint: "check the color" }, "tc-2");
+        assert.match(withHint.output.description, /check the color/);
 
-        const withoutHint = await mcpClient.callTool("read-image", { path });
-        assert.strictEqual("focusHint" in withoutHint.output, false);
+        const withoutHint = await mcpClient.callTool("read-image", { path }, "tc-3");
+        assert.doesNotMatch(withoutHint.output.description, /check the color/);
     });
 
     test("ReadImageTool: a missing file surfaces a descriptive error instead of throwing raw ENOENT", async () => {
+        executeProviderCalls.length = 0;
         const path = join(tmpDir, "does-not-exist.png");
-        const result = await mcpClient.callTool("read-image", { path });
+        const result = await mcpClient.callTool("read-image", { path }, "tc-4");
 
         assert.ok(result.output.error, "output should contain an error field");
         assert.match(result.output.error, /no file found at/);
+        assert.strictEqual(executeProviderCalls.length, 0, "provider should never be called for a file that doesn't exist");
     });
 });

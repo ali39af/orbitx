@@ -11,12 +11,14 @@ type StreamCallback = (chunk: {
   toolCallId?: string;            // on "tool"-role chunks
   toolName?: string;              // on "tool"-role chunks
   thinking?: string;               // reasoning-text delta, mirroring `content` — see "Thinking chunks" below
+  usage?: { inputMissTokens: number; inputCacheTokens: number; outputTokens: number };  // see "Usage chunks" below
+  hidden?: boolean;                // true on messages BaseAgent injected itself
 }) => Promise<void> | void;
 ```
 
 ## What you actually receive, turn by turn
 
-1. **`role: "user"`** — one chunk, `done: true`, echoing the prompt that was just added to history (either the one you passed to `run()`, or a queued one — see [Agents](./agents.md#the-run-loop)).
+1. **`role: "user"`** — one chunk, `done: true`, echoing the prompt that was just added to history (either the one you passed to `run()`, or a queued one — see [Agents](./agents.md#the-run-loop)). One exception: the forced-compaction nudge (see [Agents](./agents.md#memory-compaction)) is also a `role: "user"` chunk, but carries `hidden: true` since it's `BaseAgent` talking to the model, not the actual user — check that flag before showing a `"user"` chunk to an end user.
 2. **`role: "assistant"`** — the model's reply, streamed incrementally: zero or more `done: false` chunks each carrying the next slice of `content` as it arrives from the provider, followed by one final `done: true` chunk. `content` is delta text, not the accumulated total — append it yourself if you need the running message.
    - If the model requested tool calls this turn, each one is emitted individually, mid-stream, as soon as *that* call finishes generating — `toolCalls: [thatOneCall]` on a `done: false` chunk. See "Incremental tool-call chunks" below.
 3. **`role: "tool"`** — one chunk per dispatched tool call, `done: true`, with `content` set to the tool's result text and `toolCallId`/`toolName` identifying which call it answers. Emitted after the tool has actually finished executing (there is no streaming/progress signal for tool execution itself through this callback — see below for how to get that separately).
@@ -48,6 +50,21 @@ Detection differs by provider, since not every API has an explicit "this call is
 | Anthropic | Native `content_block_stop` event — exact and immediate. |
 | OpenAI / DeepSeek | Inferred: the API streams one call's arguments at a time with no end marker, so a call is treated as finished the instant the *next* call's first delta (carrying a fresh `id`) arrives, or the stream ends (for the last/only call). |
 | Ollama | Ollama sends each tool call already fully formed (not built up token by token), so it's emitted the moment it's seen — deduplicated in case the same call reappears in a later chunk. |
+
+## Usage chunks
+
+Every `assistant`-role chunk carries `usage` — not just the ones with a fresh number to report. Where a value isn't known yet, it's an explicit `0`, never an absent/undefined field, so consuming code can always read `chunk.usage.outputTokens` etc. without separately guarding for `usage` or its fields being missing. This is the same `streamCallback` passed into `run()`, forwarded straight through to the provider, so external code (e.g. something watching an external credit/cost budget, deciding when to call `immediateStop()`) sees it too — no separate channel.
+
+Every number here is real, straight from whatever the provider reports — nothing in this SDK estimates or guesses a token count. What differs is *when* each field stops being a placeholder `0` and starts reflecting the API's real number:
+
+| Provider | Mid-stream `usage` | Final `usage` (on `done: true`) |
+|---|---|---|
+| Anthropic | `inputMissTokens`/`inputCacheTokens` are real from the very first chunk (before any content) — that's simply when its protocol first has them, not something computed early on purpose. `outputTokens` updates on every delta. | Same numbers, just the last update. |
+| OpenAI | All three fields are `0` on every chunk before the last one (`include_usage` is honored correctly, but only delivers on completion — there's nothing to report early). | Real, billed numbers for all three fields. If the call is cut off before this chunk arrives, `inputMissTokens`/`inputCacheTokens`/`outputTokens` come back `0` on `ChatResponse` too — the API never computed them, so there's nothing to report. |
+| DeepSeek | Same as OpenAI — `0` on every chunk before the last one. | Real, billed numbers, including its own `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens` for the cache split. Same `0`-on-abort behavior as OpenAI if the call is cut off first. |
+| Ollama | All three fields are `0` on every chunk before the last one — no live signal exists for this provider at all. | Real. |
+
+Practical implication: for Anthropic and DeepSeek you get a live, reactable signal before a turn finishes (immediately for Anthropic's input side, throughout for either provider's output side); for OpenAI there's no live signal at all today — you only find out after the turn finishes, or get a hard `0` if it was cut off first.
 
 ## Minimal consumer
 
@@ -110,7 +127,7 @@ Once a turn finishes, its accumulated reasoning is available two ways on both `C
 
 ## What's *not* in the stream today
 
-- **No live per-tool progress channel through `StreamCallback`.** For domains that emit their own progress (browser navigation, long-running bash processes), subscribe to that domain's `*Interaction` `EventEmitter` directly instead (e.g. `BrowserInteraction`, `BashInteraction`) — see [Tools](./tools.md).
+- **No live per-tool progress channel through `StreamCallback`.** There's no built-in way to observe a long-running tool call (browser navigation, a bash process) mid-flight — `execute()` runs to completion and its return value is the only thing surfaced.
 - **Tool calls still only appear once, fully assembled** — see above. `thinkEffort`/thinking chunks don't change that.
 
 If your use case depends on either of these, check the project's issue tracker / recent changes before assuming they're unavailable — this area of the SDK is actively evolving.

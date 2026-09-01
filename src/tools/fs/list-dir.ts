@@ -1,7 +1,6 @@
 import { readdir, stat } from "fs/promises";
 import { join } from "path";
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import { FsInteraction } from "./interaction.js";
 import { resolvePath } from "./utils.js";
 
 const DEFAULT_EXCLUDED_DIRS = [
@@ -68,7 +67,7 @@ async function walk(
     return results;
 }
 
-export const FsListDirTool = () => new MCPTool<FsInteraction>({
+export const FsListDirTool = () => new MCPTool({
     name: "fs-list-dir",
     description:
         "list the entries (files and directories) inside a directory, optionally paging through the results by entry index so very large directories (especially with recursive: true) never need to be returned in one shot. certain directories (node_modules, .git, etc) are excluded from recursion by default via excludeDirs",
@@ -109,12 +108,11 @@ export const FsListDirTool = () => new MCPTool<FsInteraction>({
             default: 500,
         },
     ],
-    customClass: new FsInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: MCP,
-        customClass?: FsInteraction
+        _toolCallId?: string,
+        _mcp?: MCP
     ): Promise<any> => {
         const {
             path,
@@ -125,8 +123,6 @@ export const FsListDirTool = () => new MCPTool<FsInteraction>({
         } = inputs;
 
         const fullPath = resolvePath(path);
-
-        customClass?.emitFsEvent({ type: "listing", path: fullPath });
 
         const excludeSet = new Set<string>(excludeDirs);
 

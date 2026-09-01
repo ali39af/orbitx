@@ -1,8 +1,7 @@
 import { MCPTool, type MCP } from "../../core/mcp.js";
-import { BashInteraction } from "./interaction.js";
 import { terminateProcess, getProcess } from "./process-manager.js";
 
-export const BashTerminateTool = () => new MCPTool<BashInteraction>({
+export const BashTerminateTool = () => new MCPTool({
     name: "bash-terminate",
     description: "terminate a running process (e.g. stop an endless `npm run dev` once it's no longer needed)",
     inputs: [
@@ -20,12 +19,11 @@ export const BashTerminateTool = () => new MCPTool<BashInteraction>({
             default: false,
         },
     ],
-    customClass: new BashInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        _mcp?: MCP,
-        customClass?: BashInteraction
+        _toolCallId?: string,
+        _mcp?: MCP
     ): Promise<any> => {
         const { processId, force = false } = inputs;
 
@@ -37,8 +35,6 @@ export const BashTerminateTool = () => new MCPTool<BashInteraction>({
 
         const proc = getProcess(processId);
         await proc.waitFor(3000);
-
-        customClass?.emitBashEvent({ type: "terminated", processId });
 
         return {
             message: "success",

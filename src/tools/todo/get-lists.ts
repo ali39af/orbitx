@@ -5,7 +5,7 @@ export const TodoGetListsTool = () => new MCPTool({
     name: "todo-get-lists",
     description: "get all existing todo list ids",
     inputs: [],
-    execute: async (_envID: string, _inputs: Record<string, any>, mcp?: MCP): Promise<any> => {
+    execute: async (_envID: string, _inputs: Record<string, any>, _toolCallId?: string, mcp?: MCP): Promise<any> => {
         if (!mcp) {
             throw new Error("todo-get-lists requires an MCP context");
         }

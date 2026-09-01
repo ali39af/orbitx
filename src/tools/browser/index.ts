@@ -13,8 +13,6 @@ export { BrowserScrollTool } from "./scroll.js";
 export { BrowserNetworkStatusTool } from "./network-status.js";
 export { BrowserNetworkTool } from "./network.js";
 export { BrowserScreenshotTool } from "./screenshot.js";
-export { BrowserInteraction } from "./interaction.js";
-export type { BrowserEvent } from "./interaction.js";
 
 import { BrowserCreateSessionTool } from "./create-session.js";
 import { BrowserRemoveSessionTool } from "./remove-session.js";

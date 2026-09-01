@@ -6,7 +6,7 @@ export class Skill {
         name: string;
         description: string;
         instructions: string;
-        tools: MCPTool<any>[]
+        tools: MCPTool[]
     }) {
         this.#skill = skill;
     }

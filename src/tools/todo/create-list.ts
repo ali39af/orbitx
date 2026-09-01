@@ -1,8 +1,7 @@
 import { MCPTool, generateRefId, type MCP } from "../../core/mcp.js";
-import { TodoInteraction } from "./interaction.js";
 import { getListIndex, setListIndex, setList } from "./storage.js";
 
-export const TodoCreateListTool = () => new MCPTool<TodoInteraction>({
+export const TodoCreateListTool = () => new MCPTool({
     name: "todo-create-list",
     description: "create a new todo list, returns its todoListId",
     inputs: [
@@ -13,12 +12,11 @@ export const TodoCreateListTool = () => new MCPTool<TodoInteraction>({
             required: true,
         },
     ],
-    customClass: new TodoInteraction(),
     execute: async (
         _envID: string,
         inputs: Record<string, any>,
-        mcp?: MCP,
-        customClass?: TodoInteraction
+        _toolCallId?: string,
+        mcp?: MCP
     ): Promise<any> => {
         const { name } = inputs;
 
@@ -37,8 +35,6 @@ export const TodoCreateListTool = () => new MCPTool<TodoInteraction>({
         const index = await getListIndex(mcp);
         index.push(todoListId);
         await setListIndex(mcp, index);
-
-        customClass?.emitTodoEvent({ type: "list-created", listId: todoListId, name });
 
         return {
             todoListId,

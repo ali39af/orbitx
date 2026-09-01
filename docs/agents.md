@@ -11,26 +11,36 @@
 ```ts
 new BaseAgent({
   instruction: string;
+  safetyPolicies?: string;   // default: "" — see "Guardrail system prompt" below
   allowedTools: MCPTool<any>[];
   aiProvider: AIProvider | AgentProviderEntry[];   // see Providers doc
   mcpClient: MCPClient;
   skills?: Skill[];
   maxMemorizeToken?: number;   // default: derived from the main provider's contextWindow * safeUsageRatio
   initData?: {
-    memory: string;
-    messagesFull: Message[];
-    fullInputMissTokens: number;
-    fullInputHitTokens: number;
-    fullOutputTokens: number;
-    messagesCompact: Message[];
-    currentInputMissTokens: number;
-    currentInputHitTokens: number;
-    currentOutputTokens: number;
+    compactMemory: string;
+    retiredMessages: Message[];   // complete, ever-appended history of retired messages — each Message carries its own usage/timestamp
+    messagesCompact: Message[];   // the working context currently replayed to the provider every turn
+  };
+  features?: {
+    executeProviderFromMCPTool?: boolean;   // default: false — see "executeProvider feature flag" below
   };
 });
 ```
 
-`SimpleAgent`'s constructor is the same shape minus `mcpClient`/`allowedTools` (it builds those from `tools`), plus `tools?: MCPTool<any>[]` and `maxMemorizeToken` defaulting to `16000` instead of being derived.
+### Guardrail system prompt
+
+`safetyPolicies` is a separate `role: "system"` message, sent as its own leading entry ahead of the regular system prompt (see [Instructions, skills, and memory](#instructions-skills-and-memory-in-the-system-prompt)) on every main-provider `chat()` call in the run loop. Keep house rules/guardrails here rather than folding them into `instruction`, since it's a separate, cache-stable prefix ahead of the rest of the system prompt.
+
+It is **not** prepended on an `executeProvider` call (see below) — stuffing a policy paragraph ahead of a narrow, single-purpose call (e.g. "describe this image") measurably degrades that call's output, and not every registered provider role even accepts a `system` message the way the main LLM does. A pre-dispatch content-safety check is the intended replacement there; not implemented yet.
+
+### `executeProvider` feature flag
+
+A tool's `execute()` can reach a registered `AIProvider` directly via `mcp.executeProvider(toolCallId, type, input)` (see [Tools](./tools.md#mcpexecuteprovider--calling-a-provider-from-inside-a-tool)) — a bigger trust surface than a tool that only returns data to the model, since it lets a tool spend real provider calls (and, per the point above, without a guardrail system prompt ahead of them). It's off by default: `BaseAgent#executeProvider` throws immediately unless `features.executeProviderFromMCPTool` was set `true` on construction. This gates every role uniformly (`image-describer` included) — enable it once you're ready to trust the tools you've allowed with direct provider access.
+
+`SimpleAgent`'s constructor is the same shape minus `mcpClient`/`allowedTools` (it builds those from `tools`), plus `tools?: MCPTool<any>[]` and `maxMemorizeToken` defaulting to `16000` instead of being derived. `safetyPolicies` and `features` pass straight through to the underlying `BaseAgent`.
+
+Token accounting no longer lives in `initData` as separate counters — every `Message` carries its own `usage` (see [Token accounting](#token-accounting)), so `retiredMessages`/`messagesCompact` alone are enough to resume with full token history intact.
 
 ## The run loop
 
@@ -60,6 +70,8 @@ Practical implication: don't treat an early queued call's resolved `run()` promi
 
 `immediateStop()` requests the same stop but returns right away without waiting for confirmation, **and** aborts the in-flight `chat()` call to the main provider immediately — the underlying HTTP request is cancelled rather than left to run to completion, so no further output tokens get generated (and billed) past that point. Input tokens, and any output already generated before the abort landed, are already committed — cancelling can't retroactively make those free. This is the one to reach for when a call has to be killed regardless of how far through it is (e.g. a credit balance that just went negative). A tool dispatch already in progress isn't aborted (tools have no generic cancellation hook) — the loop stops as soon as that call returns. Abort support is real for Anthropic, OpenAI, and DeepSeek (both streaming and non-streaming); for Ollama it only takes effect on streaming calls — see the note in `ollama-provider.ts`.
 
+If you're deciding *when* to call `immediateStop()` from outside — e.g. against an external credit/cost system — watch `usage` on the `StreamCallback` chunks (see [Streaming](./streaming.md)) rather than waiting for `run()` to resolve: it's the same callback passed into `run()`, forwarded straight through to the provider, so external code sees the same numbers `BaseAgent` itself uses to build `Message.usage`. Note this is only genuinely live for Anthropic — the other three providers only report usage once a turn is already complete, so for them there's no earlier signal to react to, cancellation-timing-wise, than the final chunk.
+
 For a **streaming** call, an abort doesn't throw the turn away: `chat()` resolves normally with whatever text, thinking, and tool calls were already accumulated before the cutoff — the same as if the model had naturally stopped there — so anything already sent to `streamCallback` still ends up recorded in message history instead of vanishing. A tool call the model was still in the middle of generating when the abort hit is dropped even then (its arguments may be truncated JSON); only tool calls that had already fully finished are included — e.g. if the model requested 3 tool calls and the abort landed while the 3rd was still streaming, only the first 2 come back. For a **non-streaming** call there's nothing to salvage (the API only returns a response once, in full) — abort there still surfaces as a thrown error, and `BaseAgent` discards that turn entirely rather than recording a broken one.
 
 `stop()` is a deprecated alias for `safeStop()` and will be removed in the 1.0.0 major release.
@@ -74,37 +86,50 @@ OrbitX never truncates or deletes conversation history. Compaction happens throu
 
 Calling `compact_memory`:
 
-1. Replaces the running `memory` string with `new_memory`, which is injected into every future system prompt (`MEMORY:` section).
-2. Clears `messagesCompact` — the *working* context sent to the provider each turn.
-3. Leaves `messagesFull` — the complete, ever-appended history — untouched, so nothing is lost; it's just no longer replayed to the model every turn.
-4. Rolls the current token counters into the lifetime totals (see [Token accounting](#token-accounting)) and resets them to zero.
+1. Replaces the running `compactMemory` string with `new_memory`, which is injected into every future system prompt (`MEMORY:` section). The cached system prompt is invalidated at the same time, so the very next turn's system prompt is rebuilt with the new summary rather than replaying the stale one.
+2. Moves everything currently in `messagesCompact` — the *working* context sent to the provider each turn — into `retiredMessages`, then clears `messagesCompact`. Nothing is lost, it's just retired from what gets replayed to the model every turn. Nothing needs to be separately "rolled into a lifetime total" — every message already carries its own `usage`, so `getFullTotalToken()` (see [Token accounting](#token-accounting)) just sums `retiredMessages` + `messagesCompact` directly.
 
-`BaseAgent` also tracks two token totals per run: `currentInputMissTokens` (uncached input) and `currentLastOutputTokens` (the last turn's output). When their sum exceeds `maxMemorizeToken`, the agent doesn't compact on the model's behalf — instead it appends a `role: "user"` message telling the model to call `compact_memory` before doing anything else, and loops back for another turn. This keeps compaction on the same native tool-call path the model already uses for everything else, rather than a hidden side-channel; a model that ignores the nudge (rare, since the instruction is explicit) will simply see it repeated on the next turn until it complies.
+Before each turn, `BaseAgent` also checks the current context size: the summed `inputMissTokens` of every message's `"main"` usage entry across `messagesCompact` (see [Token accounting](#token-accounting)) — a cheap proxy for context size, not a precise replay-cost measurement. When that sum exceeds `maxMemorizeToken`, the agent doesn't compact on the model's behalf — instead it appends a `role: "user"` message telling the model to call `compact_memory` before doing anything else, and loops back for another turn. This keeps compaction on the same native tool-call path the model already uses for everything else, rather than a side-channel the model never sees; a model that ignores the nudge (rare, since the instruction is explicit) will simply see it repeated on the next turn until it complies.
+
+This nudge message (and its matching `StreamCallback` chunk) is marked `hidden: true`, since it's `BaseAgent` talking to the model on the caller's behalf, not something a human said or the model produced — a chat UI built on this SDK should filter it out of what it shows an end user, the same way it wouldn't show raw system-prompt text. See [Streaming](./streaming.md) for the full `Message`/chunk field reference.
 
 `maxMemorizeToken`, if not passed explicitly, is derived as `contextWindow * safeUsageRatio` (default ratio `0.5`) from the main provider's `getCapabilities()` — so it scales automatically with whatever model you plug in.
 
 ## Persisting and resuming state
 
-`getCurrentAgentStates()` returns exactly the shape expected by the `initData` constructor option — `memory`, `messagesFull`, `messagesCompact`, the six main-loop token counters, and the two image-usage counters (`imageInputMissTokens`, `imageOutputTokens` — see [Token accounting](#token-accounting)). Serialize it (it's plain JSON) after any `run()` call, and pass it back into a fresh `BaseAgent`/`SimpleAgent` to resume — same conversation, same memory, same token history. See the example in [Getting Started](./getting-started.md#recovering-an-agents-state).
+`getCurrentAgentStates()` returns exactly the shape expected by the `initData` constructor option — `compactMemory`, `retiredMessages`, `messagesCompact`. Serialize it (it's plain JSON) after any `run()` call, and pass it back into a fresh `BaseAgent`/`SimpleAgent` to resume — same conversation, same memory, same token history, since every message already carries its own `usage`. See the example in [Getting Started](./getting-started.md#recovering-an-agents-state).
 
-The two image counters are optional on `initData` — a snapshot taken before image-usage tracking existed still loads, with both defaulting to `0`.
+A snapshot taken with an older SDK version, before per-message `usage` existed, still loads fine — messages with no `usage` field just contribute `0` to every token total below.
 
 ## Token accounting
 
-Four read methods, all returning `{ total, inputHit, inputMiss, output }`:
+Token usage lives on `Message.usage` (`MessageUsage[]`), not on separate counters — `BaseAgent` populates it as `chat()` responses come back, and the four read methods below are pure derived sums over `retiredMessages`/`messagesCompact`. There's no rollover bookkeeping to keep in sync on compaction (see [Memory compaction](#memory-compaction)): a message lives in exactly one of `retiredMessages` (retired) or `messagesCompact` (active) at a time — they're disjoint, not overlapping — so "already compacted away" is simply `retiredMessages` itself, with no slicing required. The complete history at any point is the concatenation of the two, in that order, not `retiredMessages` alone.
 
-- `getCurrentTotalTokens()` — main-loop tokens used since the last memory compaction.
-- `getFullTotalTokens()` — main-loop tokens used across all *prior* compacted segments.
-- `getImageTotalTokens()` — tokens used by every `ImageDescriber` call this agent has made (see [Providers](./providers.md#two-provider-roles-main--image)), tracked separately since a one-off image-description call has no conversation history to compact and so doesn't fit the current/full split.
-- `getTotalTokens()` — the sum of all three (lifetime total for this agent instance, main loop and image calls combined).
+Each entry in `Message.usage` is one of:
 
-`inputHit`/`inputMiss` on the main-loop methods track cached vs. uncached input tokens, since the compacted-context-replay pattern means most of a long conversation's prefix is a cache hit on providers that support prompt caching — this is a heuristic `BaseAgent` computes itself from the growing/reset conversation history: whatever was `inputMiss` last turn rolls into `inputHit` this turn, and `inputMiss` becomes this turn's raw input token count.
+```ts
+{ type: ProviderType; unit: "tokens"; inputMissTokens: number; inputCacheTokens: number; outputTokens: number }
+{ type: ProviderType; unit: "cost"; cost: number }
+```
 
-`getImageTotalTokens()`'s `inputHit` is always `0` — each `ImageDescriber` call is a fresh, standalone chat with no prior turns to replay, so there's nothing for that heuristic to apply to. Every input token an image call reports counts as `inputMiss`.
+`type` is the provider role that produced the entry (see [Provider roles](./providers.md#provider-roles) — `"main"`, `"image-describer"`, or anything else registered/looked up). `unit` distinguishes real token billing from anything that isn't naturally token-shaped — an image/audio/3D-generation call billed as a flat price reports `unit: "cost"` instead.
+
+**Attribution** — a `type: "main"` entry is set only on the assistant message a `chat()` call produced, straight from that call's own `inputMissTokens`/`inputCacheTokens`/`outputTokens`. There's no splitting or attribution onto the user/tool messages that triggered the call, and no per-message context-size measurement — a user or tool message never carries a `"main"` entry. These are real, provider-reported numbers (Anthropic's `cache_read_input_tokens`/`cache_creation_input_tokens`, DeepSeek's `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens`, OpenAI's `prompt_tokens_details.cached_tokens`), not a client-side guess — see [Providers](./providers.md) for what each one actually reports and Ollama's lack of any cache concept (`inputCacheTokens` always `0` there).
+
+The compaction trigger (see [Memory compaction](#memory-compaction)) sums `inputMissTokens` across every assistant message's `"main"` entry in `messagesCompact` as a cheap proxy for context size — not a precise measurement of what replaying `messagesCompact` right now would actually cost, since each entry reflects the call that produced that one assistant message, not the whole context at that point.
+
+Every other `type` entry comes from a tool calling `mcp.executeProvider(toolCallId, type, input)` (see [Tools](./tools.md#mcpexecuteprovider--calling-a-provider-from-inside-a-tool)) — but the entry itself is recorded by `BaseAgent`, the instant the real provider call resolves, never by the tool's own return value. This is deliberate: a tool can't under-report (or hide) what it spent, because it never holds the usage number to begin with — `BaseAgent` keys it by `toolCallId` and moves it onto that call's result `Message.usage` only after `execute()` returns, regardless of what the tool itself returns. `read-image`/`browser-screenshot`, for example, trigger a `type: "image-describer", unit: "tokens"` entry with no hit/miss split (each call is a fresh, standalone chat issued directly against the resolved provider by `BaseAgent`, so every input token counts as `inputMissTokens`).
+
+`executeProvider` picks `unit: "tokens"` vs `unit: "cost"` dynamically from what the provider's `ChatResponse` actually reported, rather than assuming one or the other: if the response set `cost` (a flat, non-token price — see [`ChatResponse`](./providers.md#writing-a-custom-provider)), the entry is `unit: "cost"`; otherwise it falls back to the token fields (`inputMissTokens`/`inputCacheTokens`/`outputTokens`, each defaulting to `0` if the provider omitted them). Every built-in provider (Anthropic/OpenAI/DeepSeek/Ollama) is token-billed and always takes the token path — `cost` only comes into play for a custom provider registered under an image/video/audio-generation-style role that bills per-request instead of per-token.
+
+**The four read methods:**
+
+- `getCompactTotalTokens(type: ProviderType)` / `getFullTotalToken(type: ProviderType)` — return `{ total, inputHit, inputMiss, output }`, summing `unit: "tokens"` entries matching `type` over `messagesCompact` only, or `retiredMessages` + `messagesCompact` (this agent's whole lifetime), respectively.
+- `getCompactTotalCost(type: ProviderType)` / `getFullTotalCost(type: ProviderType)` — return a plain `number`, summing `unit: "cost"` entries matching `type` over the same two scopes.
 
 ## Instructions, skills, and memory in the system prompt
 
-The system prompt is built once (lazily, on first use) and never changes for the lifetime of an agent instance — a stable prefix, which matters for provider-side prompt caching. It's assembled from: a fixed "you have tools" preamble, each skill's name/description/instructions (see [Skills](./skills.md)), the current `MEMORY:` block, and your `instruction` string, in that order.
+The system prompt is built lazily on first use and cached — a stable prefix between compactions, which matters for provider-side prompt caching. It's assembled from: a fixed "you have tools" preamble, each skill's name/description/instructions (see [Skills](./skills.md)), the current `MEMORY:` block (sourced from `compactMemory`), and your `instruction` string, in that order. Each `compact_memory` call invalidates the cache (see [Memory compaction](#memory-compaction)), so the next turn's system prompt is rebuilt with the fresh `MEMORY:` block instead of the one that was current when the prompt was first built.
 
 ## Multi-agent: `WorkerAgent` *(experimental)*
 

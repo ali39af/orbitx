@@ -26,8 +26,11 @@ Registers tools and listens on its `connection` for incoming tool-call requests,
 ```ts
 new MCPClient(envID: string, connection: MCPConnection | MCPConnection[], storage?: MCPStorage, rng?: MCPRNG, mcpFilter?: MCPFilter);
 mcpClient.getTools(): Promise<ToolSchema[]>;
-mcpClient.callTool(name: string, inputs: Record<string, any>): Promise<MCPToolOutput>;
+mcpClient.callTool(name: string, inputs: Record<string, any>, toolCallId?: string): Promise<MCPToolOutput>;
+mcpClient.setExecuteProviderHandler(handler: (toolCallId: string, type: ProviderType, input: Record<string, any>) => Promise<{ output: Record<string, any> }>): void;
 ```
+
+`toolCallId` on `callTool()` and the handler installed via `setExecuteProviderHandler()` are what `BaseAgent` wires up automatically so `mcp.executeProvider(...)` works inside a tool's `execute()` — see [Custom `MCP` subclasses](#custom-mcp-subclasses) below. You don't need to call either yourself unless you're driving `MCPClient` outside of `BaseAgent`.
 
 This is what you pass into `BaseAgent({ mcpClient, ... })`. `envID` scopes storage/RNG state per logical environment/session — pass a stable id (e.g. a user or conversation id) if you want isolated tool state per agent instance sharing a server. Accepting an array of connections lets one client fan out across multiple servers.
 
@@ -100,4 +103,13 @@ Pass literal strings (e.g. an API key you never want echoed back to the model) o
 
 ## Custom `MCP` subclasses
 
-Both `MCPServer` and `MCPClient` extend the abstract `MCP` class (`getStorage()`, `getRNG()`). Tool `execute` functions receive the calling `MCP` instance as their third argument, so a custom `MCPCustomClass`-based tool (see [Tools](./tools.md#the-mcptool-shape)) can reach storage/RNG scoped to whichever client dispatched the call.
+Both `MCPServer` and `MCPClient` extend the abstract `MCP` class — `getStorage()`, `getRNG()`, and `executeProvider(toolCallId, type, input)`. Tool `execute` functions receive the calling `MCP` instance directly, as their 4th argument (after a `toolCallId` — see [Tools](./tools.md#the-mcptool-shape)), so a tool can reach storage/RNG scoped to whichever client dispatched the call.
+
+`executeProvider` is where the two subclasses genuinely differ:
+
+- **`MCPClient`** answers it in-process, by delegating to a handler `BaseAgent` installs on the client via `setExecuteProviderHandler(...)` at construction time. `MCPClient` itself never imports anything from `ai-provider.ts` — it just holds an opaque callback.
+- **`MCPServer`** has no such handler — it never touches a provider directly. It proxies the request over its `MCPConnection` (an `executeProvider`/`executeProviderResponse` message pair, mirroring `toolCall`/`toolCallCallback` but initiated by the server instead of the client) to whichever `MCPClient` is attached, which runs the same installed handler and answers back.
+
+So a **server-registered** tool — the kind meant to run inside `MCPComputer`'s sandbox, or in a genuinely separate process over IPC/WS — can still call `mcp.executeProvider(...)` and get a real result, without a provider instance (or the credentials it holds) ever crossing into that process. Only a scoped request/response for one call does. This is deliberate: filesystem/browser-touching tools like `ReadImageTool`/`BrowserScreenshotTool` are exactly the kind this doc already recommends sandboxing (see above), and they both need a provider to do their job.
+
+That accessor also carries provider access (`agent.getProvider(type)`/`getProviders(type)`) — but **only for a tool dispatched by `MCPClient.callTool`'s local branch** (a tool registered directly on the client, per the section above). `MCPServer`'s dispatch (both the `toolCall` handler above and, transitively, anything a remote/sandboxed tool triggers) builds an accessor with no provider registry behind it at all, so `getProvider`/`getProviders` there always resolve `undefined`. This is deliberate, not a gap to work around: provider instances hold API keys, and `MCPServer` is precisely the thing that runs inside a separate process or an `MCPComputer` sandbox — credentials never need to, and never do, cross that boundary. A tool that needs to call a provider directly (e.g. to describe an image it just read) has to be registered on the `MCPClient`, in the same process as the agent that owns those providers.

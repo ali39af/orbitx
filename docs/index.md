@@ -11,12 +11,13 @@ This directory is written for two audiences at once:
 
 1. [Getting Started](./getting-started.md) — install, first agent, streaming output, resuming state.
 2. [Providers](./providers.md) — `AIProvider`, the four built-in providers, capabilities, main/image roles.
-3. [Agents](./agents.md) — `BaseAgent` vs `SimpleAgent`, the run loop, memory compaction, tokens, and multi-agent (`WorkerAgent`/`AgentTools`).
-4. [Tools](./tools.md) — the `MCPTool` shape, built-in tool catalog, writing your own tools.
-5. [Skills](./skills.md) — bundling instructions + tools, built-in skill catalog, writing your own.
-6. [MCP Architecture](./mcp-architecture.md) — `MCPServer`/`MCPClient`/connections, in-process vs IPC vs WS, `MCPComputer` sandbox.
-7. [Streaming](./streaming.md) — the `StreamCallback` chunk shape and how to consume it.
-8. [API Reference](./api-reference.md) — flat index of every public export from `orbitx`.
+3. [Agents](./agents.md) — `BaseAgent` vs `SimpleAgent`, the run loop, memory compaction, tokens.
+4. [Swarm](./swarm.md) — many agents that hire, task, and report to each other: `SwarmBase`, `AgentDefinition`, `getAgentTools()`.
+5. [Tools](./tools.md) — the `MCPTool` shape, built-in tool catalog, writing your own tools.
+6. [Skills](./skills.md) — bundling instructions + tools, built-in skill catalog, writing your own.
+7. [MCP Architecture](./mcp-architecture.md) — `MCPServer`/`MCPClient`/connections, in-process vs IPC vs WS, `MCPComputer` sandbox.
+8. [Streaming](./streaming.md) — the `StreamCallback` chunk shape and how to consume it.
+9. [API Reference](./api-reference.md) — flat index of every public export from `orbitx`.
 
 ## The shape of the library, in one paragraph
 

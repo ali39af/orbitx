@@ -45,7 +45,7 @@ abstract class MCP {
 
 `type` picks a role (see [Provider roles](./providers.md#provider-roles)); `input` must be `Message`-shaped — `{ content: string }` for plain text, or `{ parts: MessageContentPart[] }` when real multimodal content (an image, say) needs to reach the provider. `BaseAgent#executeProvider` spreads `input` straight onto the outgoing `role: "user"` message (no `safetyPolicies` system message here, unlike the main run loop — see [Guardrail system prompt](./agents.md#guardrail-system-prompt)) and stays completely type-agnostic itself — it never branches on `type`, so a role that needs `parts` (`image-describer`) and one that only needs `content` (a plain text-generation role) go through the exact same code path. Shaping `input` correctly is the calling tool's job: **use `parts`, not a `data:` URI folded into `content`, for images/video** — every built-in provider (Anthropic/OpenAI/DeepSeek/Ollama) only builds a real multimodal content block from `Message.parts`; a base64 string inside `content` is sent to the model as literal text, not an image. This works identically no matter where the tool is registered — directly on an `MCPClient`, or on a sandboxed/remote `MCPServer` (see [MCP Architecture](./mcp-architecture.md#custom-mcp-subclasses)) — because the actual provider call always happens on the trusted side (wherever `BaseAgent` lives): a client-registered tool reaches it in-process, a server-registered one has the request proxied there over the existing connection and back. No provider instance, or the credentials it holds, is ever visible to the tool — only this request/response.
 
-**Off by default.** `executeProvider` throws immediately unless the owning `BaseAgent` was constructed with `features: { executeProviderFromMCPTool: true }` (see [`executeProvider` feature flag](./agents.md#executeprovider-feature-flag)) — a tool reaching a provider directly, with no guardrail prompt ahead of it, is a bigger trust surface than one that only returns data to the model, so it needs an explicit opt-in from whoever builds the agent.
+**Off by default.** `executeProvider` throws immediately unless the owning `BaseAgent` was constructed with `features: { executeProviderFromMCPTool: true }` (see [`executeProvider` feature flag](./agents.md#executeprovider-feature-flag)) — a tool reaching a provider directly, with no guardrail prompt ahead of it, is a bigger trust surface than one that only returns data to the model, so it needs an explicit opt-in from whoever builds the agent. In a swarm the opt-in is the swarm's, not each agent's — see [Swarm](./swarm.md#providers-a-tool-reaches-for).
 
 `read-image`/`browser-screenshot` (below) are the reference example — the instruction as a `text` part, the base64 image as an `image` part:
 
@@ -63,7 +63,7 @@ If `executeProvider` rejects (no provider configured for that role, etc.), just 
 
 ### Usage is never something a tool reports itself
 
-There's no `usage` field on what `execute` returns. Every `executeProvider` call is recorded by `BaseAgent` the instant the real provider call resolves — keyed by `toolCallId`, moved onto the tool's result `Message.usage` only after `execute()` returns (see [Token accounting](./agents.md#token-accounting)) — specifically so a compromised or rewritten tool can't just under-report what it spent; it never holds that number to begin with.
+There's no `usage` field on what `execute` returns. Every `executeProvider` call is recorded by `BaseAgent` the instant the real provider call resolves — keyed by `toolCallId`, moved onto the tool's result `Message.usage` only after `execute()` returns (see [Token accounting](./agents.md#token-accounting)) — specifically so a compromised or rewritten tool can't just under-report what it spent; it never holds that number to begin with. (In a swarm, `SwarmBase` answers the call but records it the same way, back onto the calling agent's tool-result message — see [Providers a tool reaches for](./swarm.md#providers-a-tool-reaches-for).)
 
 Tools are registered on an `MCPServer` and invoked through an `MCPClient`; `SimpleAgent` does this wiring for you from a flat `tools` array.
 
@@ -161,19 +161,21 @@ Backs the `PlannerSkill` (see [Skills](./skills.md)), but usable standalone.
 | `DelayTool` | Wait a given number of milliseconds (max 60000ms) before continuing. |
 | `ReadImageTool` | Read an image file off disk and return a text description of it — same handling as `BrowserScreenshotTool`. |
 
-### Multi-agent — `AgentTools(availableAgents, options?)` *(experimental)*
+### Swarm — `getAgentTools(options?)`
 
-**Experimental** — see the note in [Agents](./agents.md#multi-agent-workeragent-experimental).
-
-Unlike every other domain above, this one takes parameters: a fixed roster of `WorkerAgent` instances (see [Agents](./agents.md#multi-agent-workeragent-experimental)) you build ahead of time, and an optional `{ maxHired?: number }` cap on how many can be hired at once. Give the result to your **planner** agent.
+Unlike every other domain above, this one doesn't return an `MCPTool[]`. It returns a **handle** whose `.tools` is the array, because the same object also has to be handed to `SwarmBase` — the tools and the swarm share the state minted when the handle is built (the hire pool, and which swarm they drive). Full walkthrough in [Swarm](./swarm.md).
 
 | Tool | Purpose |
 |---|---|
-| `agent-list` | List every worker in the roster — name, description, rating, and hired status. Also returns `hiredCount` and (when set) `maxHired`. |
-| `agent-hire` | Hire a worker by name, making it eligible for `agent-prompt`. |
-| `agent-prompt` | Send a prompt to a hired worker and return its response once it's done. |
+| `agent-types` | List the kinds of agent this swarm can hire — description, ratings, how many are working, slots left. |
+| `agent-hire` | Spawn an agent of a type, optionally into a group and with a standing briefing. The caller becomes its parent. |
+| `agent-fire` | Release one of your own hires and free its slot. |
+| `agent-active` | List every hired agent — id, type, groups, parent, `busy`, `awaitingReport`. The last two together separate "working" from "paused mid-task" from "idle" — see [Swarm](./swarm.md#telling-a-paused-agent-from-a-dead-one). |
+| `agent-prompt` | Hand a task to one of your hires; returns immediately, the answer comes back later as a report. |
+| `agent-report-parent` | Send a result to the agent that hired you, ending your turn. |
+| `agent-report-group` | Send a message to your group's other members; your parent never sees it, and your turn continues. |
 
-`AgentReportTool` is a separate, standalone factory in the same module — put it on each **worker's own** tool list instead (not the planner's), so a worker can hand a result back and end its turn. See [Agents](./agents.md#agent-report--for-workers-not-the-planner) for the full walkthrough.
+Who can do what is decided by which of these each agent's `allowedTools` includes — hiring tools for a planner, reporting tools for a worker — not by building separate tool sets. `{ maxHired }` caps hires across the whole swarm as one shared pool, and is woven into `agent-hire`'s own description so the model sees the constraint.
 
 ## Writing a custom tool
 

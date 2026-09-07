@@ -1,6 +1,6 @@
 [![OrbitX Logo](https://raw.githubusercontent.com/ali39af/orbitx/refs/heads/main/orbitx.svg)](#)
 
-📖 **[Full documentation](./docs/index.md)** — a deeper, page-by-page guide (providers, agents, tools, skills, MCP transport, streaming, full API reference), written to be useful both to humans learning the library and to AI agents coding against it.
+📖 **[Full documentation](./docs/index.md)** — a deeper, page-by-page guide (providers, agents, swarms, tools, skills, MCP transport, streaming, full API reference), written to be useful both to humans learning the library and to AI agents coding against it.
 
 ## Installation
 
@@ -250,17 +250,40 @@ Drives a real headless browser session.
 | `GetCurrentTimeTool` | Get the current date/time (ISO string, unix timestamp, timezone). |
 | `DelayTool` | Wait a given number of milliseconds (max 60000ms) before continuing. |
 
-### Multi-agent (`AgentTools`) — Experimental
+### Swarm (`getAgentTools`)
 
-⚠️ This feature is new and still settling — names and behavior may change in a future release.
+The tools a group of agents uses to hire, task, and report to each other. Unlike the other domains this one returns a **handle**, not an array — `handle.tools` goes into your tool pool, and the handle itself goes into `SwarmBase`, because both sides share the state built with it (the shared hire pool, and which swarm the tools drive).
 
-Unlike the other domains, this one takes parameters — a roster of `WorkerAgent`s (a `BaseAgent` with a name/description/rating) you build ahead of time, and an optional hiring cap: `AgentTools([worker1, worker2, ...], { maxHired: 2 })`. Give the result to your planner agent so it can list, hire, and prompt those workers as sub-agents; give each worker its own `AgentReportTool()` so it can hand a result back and stop. Full walkthrough in the [docs](./docs/agents.md#multi-agent-workeragent-experimental).
+```ts
+const agentTools = getAgentTools({ maxHired: 5 });
+
+const swarm = new SwarmBase({
+  tools: [...FsTools(), ...BashTools(), ...UtilTools(), ...agentTools.tools],
+  agents: DefaultAgents(),   // planner, reasoner, backend, frontend, tester, research
+  default: "planner",
+  agentTools,
+  aiProvider,
+});
+
+const done = await swarm.run("Build the checkout flow", chunk => {
+  process.stdout.write(`[${chunk.agentId}] ${chunk.content}`);
+});
+// true only once the planner AND every agent it hired are idle
+```
 
 | Tool | Purpose |
 |---|---|
-| `agent-list` | List every worker in the roster — name, description, rating, hired status. |
-| `agent-hire` | Hire a worker by name, making it eligible for `agent-prompt`. |
-| `agent-prompt` | Send a prompt to a hired worker and return its response once it's done. |
+| `agent-types` | List the kinds of agent this swarm can hire — description, ratings, how many are working, slots left. |
+| `agent-hire` | Spawn an agent of a type, optionally into a group and with a standing briefing. |
+| `agent-fire` | Release one of your own hires and free its slot. |
+| `agent-active` | List every hired agent — id, type, groups, parent, busy. |
+| `agent-prompt` | Hand a task to one of your hires; returns immediately, the answer arrives later as a report. |
+| `agent-report-parent` | Send a result to the agent that hired you, ending your turn. |
+| `agent-report-group` | Message your group's other members; your parent never sees it. |
+
+Which agent can do what is decided by its `allowedTools` — hiring tools for a planner, reporting tools for a worker — and agents themselves are written as reusable `AgentDefinition`s (the `Skill` idea, applied to agents) that you import rather than assemble.
+
+`DefaultAgents()` ships a pipeline, not just a list: the planner hires a **reasoner** (five personas arguing for a measured five minutes before answering), then a **backend** agent that must publish an API contract, then a **tester** that verifies that contract against the running server *before* it reaches anyone, then one to three **frontend** agents in a shared group who agree on the scaffold and claim files between themselves so they never overwrite each other, and finally a **tester** on the whole flow. Point the shared `MCPClient` at an [`MCPComputer`](./docs/mcp-architecture.md#mcpcomputer-sandboxed-execution) and all of that happens inside a container instead of on your machine. Full walkthrough in the [docs](./docs/swarm.md).
 
 ## Available Skills
 
@@ -278,7 +301,6 @@ A `Skill` bundles instructions with the tools that go with them. Passing a skill
 | `CodeVerificationSkill` | Running the right type checker/build/lint/test suite before handing code back, and telling real bugs apart from sandbox artifacts. |
 | `WebEndToEndTestSkill` | Testing a live web app like a real user would (fill, click, navigate) and verifying via the rendered page, console, and network — not by reading source and assuming. |
 | `ResearchSkill` | Answering questions that need real, current information from the live web — opens pages, cross-checks multiple sources, never trusts one page. |
-| `ShoppingSkill` | Purchase-decision help — real current listings, prices, links, and review sentiment instead of recommending from memory. |
 | `PresentSkill` | Deciding how to hand back a job's output as files (individually or zipped) and cleaning build artifacts out first. |
 
 ## Building from the Base Agent

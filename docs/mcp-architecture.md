@@ -30,7 +30,7 @@ mcpClient.callTool(name: string, inputs: Record<string, any>, toolCallId?: strin
 mcpClient.setExecuteProviderHandler(handler: (toolCallId: string, type: ProviderType, input: Record<string, any>) => Promise<{ output: Record<string, any> }>): void;
 ```
 
-`toolCallId` on `callTool()` and the handler installed via `setExecuteProviderHandler()` are what `BaseAgent` wires up automatically so `mcp.executeProvider(...)` works inside a tool's `execute()` — see [Custom `MCP` subclasses](#custom-mcp-subclasses) below. You don't need to call either yourself unless you're driving `MCPClient` outside of `BaseAgent`.
+`toolCallId` on `callTool()` and the handler installed via `setExecuteProviderHandler()` are what `BaseAgent` wires up automatically so `mcp.executeProvider(...)` works inside a tool's `execute()` — see [Custom `MCP` subclasses](#custom-mcp-subclasses) below. You don't need to call either yourself unless you're driving `MCPClient` outside of `BaseAgent`. A `SwarmBase` takes that handler back after building each agent, so in a swarm the provider call is answered by the swarm — see [Swarm](./swarm.md#providers-a-tool-reaches-for).
 
 This is what you pass into `BaseAgent({ mcpClient, ... })`. `envID` scopes storage/RNG state per logical environment/session — pass a stable id (e.g. a user or conversation id) if you want isolated tool state per agent instance sharing a server. Accepting an array of connections lets one client fan out across multiple servers.
 
@@ -82,12 +82,35 @@ const connection = computer.getConnection();
 await computer.stop();
 ```
 
-- `mountPath` — host directory mounted into the container (this is what filesystem tools inside the sandbox actually touch).
-- `ports` — ports to expose from the container, or `"*"` for host network mode (Linux only, or Windows via WSL2).
-- `getConnection()` — returns a ready `MCPConnection`: IPC on Linux/macOS, WebSocket on Windows (auth token generated automatically).
-- `stop()` — kills the container.
+```ts
+new MCPComputer(mountPath: string, ports: number[] | "*", image?: string, options?: MCPComputerOptions);
+```
 
-Requires the `aliafsordeh/orbitx-sandbox:0.1` image (pull it, or build it yourself from the `Dockerfile.sandbox` at the repo root).
+- `mountPath` — host directory mounted into the container (this is what filesystem tools inside the sandbox actually touch). Four subdirectories are created under it and mounted: `workspace`, `mcp-server-storage`, `presents`, `user-inputs`.
+- `ports` — ports to publish from the container, or `"*"` for host network mode. **`"*"` is Linux-only**: on Windows and macOS the container joins a VM's network namespace, so nothing it binds is reachable from your machine and published ports are ignored — the constructor throws rather than letting that surface later as a connection timeout.
+- `image` — defaults to `aliafsordeh/orbitx-sandbox:0.2`.
+- `start()` — verifies the Docker daemon is reachable, prepares the mount, launches the container, waits for its ready log, and then waits for the connection endpoint to actually accept traffic. It resolves only when the sandbox is genuinely reachable, and rejects with the container's own output when it is not.
+- `getConnection(wsHost?)` — returns a ready `MCPConnection`, cached (repeated calls hand back the same object). In `"ws"` mode it must be called after `start()`, since the port is only chosen there.
+- `waitUntilConnected(timeoutMs?)` — optional; resolves once the transport is carrying traffic, if you want the MCP handshake up before the first tool call.
+- `getPresentsHostPath()`, `getConnectionPort()`, `getContainerName()`, `isRunning()` — host-side accessors.
+- `stop()` — removes the container, closes the connection, and cleans up the socket directory. Idempotent.
+
+`MCPComputerOptions`:
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `connectionMode` | `"ipc"` on Linux, `"ws"` elsewhere | Transport between your process and the sandbox. |
+| `readyTimeoutMs` | `60_000` | Wait for the sandbox's ready log once the container is running. |
+| `pullTimeoutMs` | `300_000` | Inactivity budget while docker pulls the image, so a first run isn't killed mid-download. |
+| `handshakeTimeoutMs` | `20_000` | Wait for the endpoint to accept traffic after the ready log. |
+| `onLog` | — | `(line, "stdout" \| "stderr") => void`; receives everything the container writes. |
+| `dockerBin` | `"docker"` | Override the executable (e.g. `"podman"`, or an absolute path). |
+
+The transport default is not a style choice: Docker Desktop on Windows and macOS runs the daemon inside a VM and shares the mount over a network filesystem, which cannot carry a unix-domain socket. IPC therefore only works when the daemon and your process share a kernel, and WebSocket (loopback-published, with an auto-generated auth token) is used everywhere else.
+
+Requires the `aliafsordeh/orbitx-sandbox:0.2` image (pull it, or build it yourself from the `Dockerfile.sandbox` at the repo root). Note that the sandbox's own stdout/stderr are drained continuously for the life of the container — a piped-but-unread stream fills its OS buffer after ~64KB and blocks the sandbox process on its next write, which surfaces much later as tool calls that never return.
+
+Servers started *inside* the sandbox must bind `0.0.0.0`, not `localhost`, to be reachable through a published port; `getInstructions()` tells agents this.
 
 ## Storage and RNG
 

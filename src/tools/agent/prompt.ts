@@ -1,90 +1,52 @@
-import { MCPTool, type MCP } from "../../core/mcp.js";
-import type AgentRegistry from "./registry.js";
+import { MCPTool } from "../../core/mcp.js";
+import type AgentToolsRegistry from "./registry.js";
 
-export const AgentPromptTool = (registry: AgentRegistry) => new MCPTool({
+export const AgentPromptTool = (registry: AgentToolsRegistry) => new MCPTool({
     name: "agent-prompt",
-    description: "send a prompt to a hired worker agent and wait for its response. The worker runs its own full turn (its own reasoning, its own tools) and either calls agent-report to hand back a result, or just stops on its own — either way this returns once it's done. You can call this again later on the same agent to continue the conversation (it remembers everything from earlier prompts), or move on and never call it again if its report says the work is finished.",
+    description: "give a task to an agent you hired. Returns as soon as the task is handed over — the agent works in parallel with you and its answer arrives later as a report message from it, so do not wait or poll for a result. You can prompt several agents in a row to run them at the same time. Prompting an agent that is already mid-task adds your message to its current work rather than starting it over.",
     inputs: [
         {
-            name: "name",
+            name: "agentId",
             type: "string",
-            description: "the hired worker agent's name, exactly as shown by agent-list",
+            description: "id of the agent to task, as returned by agent-hire or shown in agent-active",
             required: true,
         },
         {
             name: "prompt",
             type: "string",
-            description: "the message to send to the worker agent",
+            description: "the task, written to stand on its own — the agent cannot see your conversation, only what you send here and the briefing it was hired with",
             required: true,
         },
     ],
     execute: async (
         _envID: string,
-        inputs: Record<string, any>,
-        _toolCallId?: string,
-        _mcp?: MCP
+        inputs: Record<string, any>
     ): Promise<any> => {
-        const { name, prompt } = inputs;
+        const { agentId: target, prompt } = inputs;
 
-        if (!name || typeof name !== "string") {
-            throw new Error("name must be a non-empty string");
+        if (!target || typeof target !== "string") {
+            throw new Error("agentId must be a non-empty string");
         }
         if (!prompt || typeof prompt !== "string") {
             throw new Error("prompt must be a non-empty string");
         }
 
-        const agent = registry.get(name);
-        if (!agent) {
-            throw new Error(`no worker agent named "${name}" — check agent-list for available names.`);
+        const { controller, agentId } = registry.requireCaller();
+        const info = registry.requireAgent(controller, target);
+
+        if (!info.active) {
+            throw new Error(`"${target}" has been fired and can no longer be prompted.`);
         }
-        if (!registry.isHired(name)) {
-            throw new Error(`worker agent "${name}" is not hired yet — call agent-hire first.`);
-        }
-
-        // retiredMessages and messagesCompact are disjoint (retiredMessages holds
-        // only what's already been retired by a compact_memory call) —
-        // concatenated, in that order, they're the complete chronological
-        // history. A mid-turn compaction just re-partitions that same sequence
-        // between the two arrays without changing its order or length, so
-        // diffing total count across both arrays stays valid even if one happens.
-        const statesBefore = agent.getCurrentAgentStates();
-        const beforeLength = statesBefore.retiredMessages.length + statesBefore.messagesCompact.length;
-        await agent.run(prompt);
-        // Only look at messages this specific call produced — otherwise a
-        // worker that answers in plain text (no fresh agent-report) could
-        // surface a stale report left over from an earlier prompt.
-        const statesAfter = agent.getCurrentAgentStates();
-        const newMessages = [...statesAfter.retiredMessages, ...statesAfter.messagesCompact].slice(beforeLength);
-
-        let report: string | undefined;
-        let reported = false;
-
-        for (let i = newMessages.length - 1; i >= 0; i--) {
-            const msg = newMessages[i];
-            if (msg.role === "tool" && msg.toolName === "agent-report") {
-                try {
-                    report = JSON.parse(msg.content || "{}").report;
-                } catch {
-                    report = msg.content;
-                }
-                reported = true;
-                break;
-            }
+        if (info.parentId !== agentId) {
+            throw new Error(`only ${info.parentId}, the agent that hired "${target}", can prompt it.`);
         }
 
-        if (!reported) {
-            for (let i = newMessages.length - 1; i >= 0; i--) {
-                const msg = newMessages[i];
-                if (msg.role === "assistant" && msg.content) {
-                    report = msg.content;
-                    break;
-                }
-            }
-        }
+        await registry.request("agent-prompt", agentId, {
+            to: [target],
+            message: `[task from ${agentId}, the agent that hired you]\n${prompt}`,
+        });
 
-        report ??= "(worker agent produced no output this turn)";
-
-        return { report, reported };
+        return { dispatched: true, agentId: target };
     },
 });
 

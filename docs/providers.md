@@ -11,6 +11,8 @@ abstract class AIProvider {
     signal?: AbortSignal
   ): Promise<ChatResponse>;
 
+  abstract getModel(): string;
+
   abstract getCapabilities(): ProviderCapabilities;
 
   abstract setOption(key: string, value: unknown): void;
@@ -21,6 +23,8 @@ abstract class AIProvider {
 - `signal`, when passed and later aborted, cancels the in-flight request to the provider's API immediately rather than just abandoning it client-side — `BaseAgent.immediateStop()` uses this so the call stops generating (and billing for) further output right away. It doesn't retroactively waive input tokens or output already generated before the abort. Anthropic, OpenAI, and DeepSeek honor it for both streaming and non-streaming calls (their SDKs forward it straight to `fetch`). Ollama only honors it for streaming calls — its client has no way to abort a non-streaming request — so a `chat()` call made without a `streamCallback` against `OllamaProvider` can't be cancelled mid-flight; see the retry-loop guard in `ollama-provider.ts`.
   - **Streaming calls resolve normally on abort**, returning a `ChatResponse` built from whatever content/thinking/tool-calls were accumulated before the cutoff, instead of throwing — so text already delivered via `streamCallback` still ends up recorded rather than discarded. A tool call still being generated when the abort lands is dropped (its arguments may be truncated JSON); only tool calls that had already fully finished streaming are included in `toolCalls`.
   - **Non-streaming calls still throw on abort** — there's no partial response to salvage since the API only returns once, in full — and `BaseAgent` discards that turn.
+- `getModel()` returns the model id this instance talks to (e.g. `"deepseek-v4-flash"`). It is stamped onto every usage entry the agent records for this provider, so a total can be broken down per model and not just per role — see [Token accounting](./agents.md#token-accounting). A custom provider must implement it; return whatever string identifies the model you're billing against.
+
 - `getCapabilities()` returns a static description used by `BaseAgent` to decide things like when to trigger memory compaction — it is **not** re-queried per call:
 
 ```ts
@@ -243,7 +247,7 @@ const agent = new BaseAgent({
 
 This is why a single vision-capable `main` provider "just works" as an image describer with zero extra config: nothing needs to be registered under `"image-describer"` explicitly — the fallback finds `main` because its `getCapabilities().supportsImages` is `true`. Role names outside this table (`"main"`, `"llm-low"`/`"medium"`/`"high"`, or any custom string) have no capability equivalent, so the fallback never applies to them — an unregistered role like that returns `undefined` from `getProvider` regardless of what any registered provider can do.
 
-`BaseAgent` is the only thing that ever calls `getProvider` directly — a tool never touches a `ProviderRegistry`, or a raw provider, itself. It reaches this indirectly via `mcp.executeProvider(toolCallId, type, input)` (see [Tools](./tools.md#mcpexecuteprovider--calling-a-provider-from-inside-a-tool)), which works the same way whether the tool is registered on the local `MCPClient` or a sandboxed/remote `MCPServer` — the request is always resolved on `BaseAgent`'s side, never handed across as a live object.
+`BaseAgent` calls `getProvider` directly, and so does `SwarmBase` when an agent is part of a swarm (see [Swarm](./swarm.md#providers-a-tool-reaches-for)) — a tool never touches a `ProviderRegistry`, or a raw provider, itself. It reaches this indirectly via `mcp.executeProvider(toolCallId, type, input)` (see [Tools](./tools.md#mcpexecuteprovider--calling-a-provider-from-inside-a-tool)), which works the same way whether the tool is registered on the local `MCPClient` or a sandboxed/remote `MCPServer` — the request is always resolved on `BaseAgent`'s side, never handed across as a live object.
 
 `resolveAgentProviders()` (`AgentProvidersInput = AIProvider | AgentProviderEntry[]`) builds the `ProviderRegistry` this all runs on — both are exported from `orbitx` if you need them directly (`getMain()`, `getProvider(type)`, `getProviders(type)` for the full pool under an exact role). There is no separate "utils" role — every tool/skill is included in the system prompt from the start, so there's nothing left for a separate pass to decide.
 
@@ -251,4 +255,4 @@ This is why a single vision-capable `main` provider "just works" as an image des
 
 Extend `AIProvider` and implement `chat`/`getCapabilities`. Follow an existing provider (e.g. `src/core/ollama-provider.ts`) as a template: translate `Message[]` to your API's wire format, stream text chunks to `streamCallback` as they arrive, accumulate tool-call deltas and emit them on the final chunk, and translate `ToolSchema[]` into your API's function-calling format (see `src/core/tool-schema-translator.ts` for existing OpenAI/Anthropic translators you can reuse or reference).
 
-`inputMissTokens`/`inputCacheTokens`/`outputTokens` on the returned `ChatResponse` are optional — every built-in provider is token-billed and always sets them, but a provider registered under a per-request-billed role (e.g. `image-generation`, `audio-clone`) should omit them and set `cost` instead. `BaseAgent#executeProvider` (see [Tools](./tools.md#mcpexecuteprovider--calling-a-provider-from-inside-a-tool)) checks `cost` first and records a `unit: "cost"` usage entry when it's present, falling back to the token fields (defaulting any missing one to `0`) otherwise — see [Token accounting](./agents.md#token-accounting).
+`inputMissTokens`/`inputCacheTokens`/`outputTokens` on the returned `ChatResponse` are optional — every built-in provider is token-billed and always sets them, but a provider registered under a per-request-billed role (e.g. `image-generation`, `audio-clone`) should omit them and set `cost` instead. `BaseAgent#executeProvider` (see [Tools](./tools.md#mcpexecuteprovider--calling-a-provider-from-inside-a-tool)) checks `cost` first and records a `unit: "cost"` usage entry (stamped with the provider's `getModel()`, like every other entry) when it's present, falling back to the token fields (defaulting any missing one to `0`) otherwise — see [Token accounting](./agents.md#token-accounting).

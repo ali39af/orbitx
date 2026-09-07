@@ -49,6 +49,7 @@ export type ProviderType =
 
 export interface MessageUsageTokens {
     type: ProviderType;
+    model: string;
     unit: "tokens";
     inputMissTokens: number;
     inputCacheTokens: number;
@@ -57,6 +58,7 @@ export interface MessageUsageTokens {
 
 export interface MessageUsageCost {
     type: ProviderType;
+    model: string;
     unit: "cost";
     cost: number;
 }
@@ -194,6 +196,8 @@ export abstract class AIProvider {
         tools?: ToolSchema[],
         signal?: AbortSignal
     ): Promise<ChatResponse>;
+
+    abstract getModel(): string;
 
     /** Describe what this provider/model can do — used by BaseAgent to pick the native-tools vs. legacy-JSON path and to size the memory-compaction threshold. */
     abstract getCapabilities(): ProviderCapabilities;

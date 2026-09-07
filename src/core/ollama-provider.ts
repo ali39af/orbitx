@@ -85,6 +85,10 @@ export class OllamaProvider extends AIProvider {
         this.#thinkEffort = options.thinkEffort;
     }
 
+    getModel(): string {
+        return this.#model;
+    }
+
     getCapabilities(): ProviderCapabilities {
         return {
             supportsTools: this.#supportsTools,

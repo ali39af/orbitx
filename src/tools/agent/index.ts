@@ -1,39 +1,67 @@
-export { AgentListTool } from "./list.js";
+export { AgentTypesTool } from "./types.js";
 export { AgentHireTool } from "./hire.js";
+export { AgentFireTool } from "./fire.js";
+export { AgentActiveTool } from "./active.js";
 export { AgentPromptTool } from "./prompt.js";
-export { AgentReportTool } from "./report.js";
-export { AgentRegistry } from "./registry.js";
-export type { AgentInfo } from "./registry.js";
+export { AgentReportParentTool } from "./report-parent.js";
+export { AgentReportGroupTool } from "./report-group.js";
+export { AgentToolsRegistry } from "./registry.js";
+export type {
+    SwarmController,
+    SwarmAgentTypeInfo,
+    SwarmAgentInfo,
+    AgentToolsEvent,
+    AgentToolsAck,
+    AgentToolsListener,
+} from "./registry.js";
 
-import type WorkerAgent from "../../core/worker-agent.js";
-import { AgentListTool } from "./list.js";
+import type MCPTool from "../../core/mcp.js";
+import AgentToolsRegistry, { type AgentToolsEvent, type AgentToolsListener, type SwarmController } from "./registry.js";
+import { AgentTypesTool } from "./types.js";
 import { AgentHireTool } from "./hire.js";
+import { AgentFireTool } from "./fire.js";
+import { AgentActiveTool } from "./active.js";
 import { AgentPromptTool } from "./prompt.js";
-import { AgentRegistry } from "./registry.js";
+import { AgentReportParentTool } from "./report-parent.js";
+import { AgentReportGroupTool } from "./report-group.js";
 
 export interface AgentToolsOptions {
-    /** Cap on how many workers may be hired at once. Omit for no limit. Surfaced dynamically in agent-hire's own description (and in agent-list's output) so the model knows the constraint without being told out of band. */
     maxHired?: number;
 }
 
-/**
- * EXPERIMENTAL — see the note on WorkerAgent (src/core/worker-agent.ts).
- *
- * Planner-side tools for a fixed roster of WorkerAgents: list them, hire
- * one, and prompt a hired one. Each call builds its own AgentRegistry, so
- * separate AgentTools(...) calls (e.g. for two different planners in the
- * same process) never share hire state.
- *
- * Not included here: AgentReportTool — that one goes on each *worker's*
- * own tool list instead, not the planner's. Import it separately.
- */
-export const AgentTools = (availableAgents: WorkerAgent[], options: AgentToolsOptions = {}) => {
-    const registry = new AgentRegistry(availableAgents, options.maxHired);
-    return [
-        AgentListTool(registry),
+export interface AgentToolsHandle {
+    readonly tools: MCPTool[];
+    readonly id: string;
+    getMaxHired(): number | undefined;
+    /** Lets the tools read the swarm's roster. SwarmBase calls this. */
+    attach(swarm: SwarmController): void;
+    /** Subscribe to what the tools ask the swarm to do. SwarmBase calls this, once per event. */
+    on(event: AgentToolsEvent, listener: AgentToolsListener): void;
+    /** Run an agent's turn labelled with its id, so tools called during it know their caller. SwarmBase wraps every run in this. */
+    runAs<T>(agentId: string, fn: () => Promise<T>): Promise<T>;
+}
+
+export const getAgentTools = (options: AgentToolsOptions = {}): AgentToolsHandle => {
+    const registry = new AgentToolsRegistry(options.maxHired);
+
+    const tools: MCPTool[] = [
+        AgentTypesTool(registry),
         AgentHireTool(registry),
+        AgentFireTool(registry),
+        AgentActiveTool(registry),
         AgentPromptTool(registry),
+        AgentReportParentTool(registry),
+        AgentReportGroupTool(registry),
     ];
+
+    return {
+        tools,
+        id: registry.id,
+        getMaxHired: () => registry.getMaxHired(),
+        attach: (swarm: SwarmController) => registry.attach(swarm),
+        on: (event, listener) => { registry.on(event, listener); },
+        runAs: (agentId, fn) => registry.runAs(agentId, fn),
+    };
 };
 
-export default AgentTools;
+export default getAgentTools;

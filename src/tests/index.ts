@@ -43,3 +43,8 @@ import "./tools/question-answer/question-answer.test.js";
 import "./tools/browser/browser-tools.test.js";
 
 import "./tools/agent/agent-tools.test.js";
+
+import "./core/agent-definition.test.js";
+import "./core/swarm-base.test.js";
+
+import "./agents/default-agents.test.js";

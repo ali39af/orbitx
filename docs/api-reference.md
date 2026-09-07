@@ -17,8 +17,13 @@ Flat index of every public export from `orbitx` (see `src/index.ts`), grouped by
 
 - `BaseAgent`
 - `SimpleAgent`
-- `WorkerAgent` *(experimental)*, type `WorkerAgentRating`
 - Types: `ExtractedSegment`, `ParsedToolCall`
+
+## Swarm — see [Swarm](./swarm.md)
+
+- `SwarmBase` — types `SwarmBaseProps`, `SwarmRunOptions`, `SwarmState`, `SwarmAgentState`, `SwarmStreamChunk`, `SwarmStreamCallback`, `SwarmAgentFailure`
+- `AgentDefinition`, `selectTools()`, `applyTextOverride()` — types `AgentDefinitionProps`, `AgentOverrides`, `AgentFactory`, `AgentFactoryOptions`, `TextOverride`
+- Ready-made definitions: `PlannerAgent`, `ReasonerAgent` (+ `REASONER_PANEL_MS`), `BackendAgent`, `FrontendAgent`, `TestAgent`, `ResearchAgent`, `DefaultAgents()`, and the shared instruction fragments `PLANNER_PROTOCOL` / `WORKER_PROTOCOL` / `TEAM_PROTOCOL` / `PRODUCTION_BAR`
 
 ## Tools — see [Tools](./tools.md)
 
@@ -36,18 +41,18 @@ Built-in tool factories, grouped by domain (each domain also exports a `*Tools()
 | Present | `PresentAddTool`, `PresentClearTool`, `PresentGetListTool`, `PresentTools`, `getPresentFolder()` |
 | Question/Answer | `QuestionAnswerTool`, `QuestionAnswerTools` |
 | Utility | `GetCurrentTimeTool`, `DelayTool`, `ReadImageTool`, `UtilTools` |
-| Multi-agent *(experimental)* | `AgentTools(availableAgents, options?)`, `AgentListTool`, `AgentHireTool`, `AgentPromptTool`, `AgentReportTool`, `AgentRegistry`, type `AgentInfo`, type `AgentToolsOptions` — see [Agents](./agents.md#multi-agent-workeragent-experimental) |
+| Swarm | `getAgentTools(options?)`, `AgentTypesTool`, `AgentHireTool`, `AgentFireTool`, `AgentActiveTool`, `AgentPromptTool`, `AgentReportParentTool`, `AgentReportGroupTool`, `AgentToolsRegistry`, types `AgentToolsOptions`, `AgentToolsHandle`, `SwarmController`, `SwarmAgentTypeInfo`, `SwarmAgentInfo`, `AgentToolsEvent`, `AgentToolsAck`, `AgentToolsListener` — see [Swarm](./swarm.md#getagenttoolsoptions) |
 
 ## Skills — see [Skills](./skills.md)
 
 - `Skill`
-- `BackendSecuritySkill`, `BigTaskSkill`, `CodeVerificationSkill`, `LongTaskEfficiencySkill`, `NodeBackendSkill`, `PlannerSkill`, `PresentSkill`, `QuestionAnswerSkill`, `ReactFrontendSkill`, `ResearchSkill`, `ShoppingSkill`, `UiUxDesignSkill`, `WebEndToEndTestSkill`
+- `BackendSecuritySkill`, `BigTaskSkill`, `CodeVerificationSkill`, `LongTaskEfficiencySkill`, `NodeBackendSkill`, `PlannerSkill`, `PresentSkill`, `QuestionAnswerSkill`, `ReactFrontendSkill`, `ResearchSkill`, `UiUxDesignSkill`, `WebEndToEndTestSkill`
 
 ## MCP transport — see [MCP Architecture](./mcp-architecture.md)
 
 - `MCPServer`, `MCPClient`
 - `MCPConnection`, `MCPIPCConnection`, `MCPWSConnection`
-- `MCPComputer` *(experimental)*
+- `MCPComputer`, type `MCPComputerOptions` *(experimental)*
 - `MCPStorage`, `MCPFSStorage`
 - `MCPRNG`
 - `MCPOutputFilter` (`MCPFilter` is a deprecated alias, removed in `1.0.0`)

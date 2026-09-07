@@ -30,18 +30,40 @@ export type { MCPToolCallRequest } from "./core/mcp-execution-policy.js";
 
 
 export { SimpleAgent } from "./templates/simple.js";
-export { WorkerAgent } from "./core/worker-agent.js";
-export type { WorkerAgentRating } from "./core/worker-agent.js";
+
+export { SwarmBase } from "./core/swarm-base.js";
+export type { SwarmBaseProps, SwarmRunOptions, SwarmState, SwarmAgentState, SwarmStreamChunk, SwarmStreamCallback, SwarmAgentFailure } from "./core/swarm-base.js";
+
+export { AgentDefinition, applyTextOverride, selectTools } from "./core/agent-definition.js";
+export type { AgentDefinitionProps, AgentOverrides, AgentFactory, AgentFactoryOptions, TextOverride } from "./core/agent-definition.js";
 
 export {
-    AgentTools,
-    AgentListTool,
+    getAgentTools,
+    AgentTypesTool,
     AgentHireTool,
+    AgentFireTool,
+    AgentActiveTool,
     AgentPromptTool,
-    AgentReportTool,
-    AgentRegistry,
+    AgentReportParentTool,
+    AgentReportGroupTool,
+    AgentToolsRegistry,
 } from "./tools/agent/index.js";
-export type { AgentInfo, AgentToolsOptions } from "./tools/agent/index.js";
+export type { AgentToolsOptions, AgentToolsHandle, SwarmController, SwarmAgentTypeInfo, SwarmAgentInfo, AgentToolsEvent, AgentToolsAck, AgentToolsListener } from "./tools/agent/index.js";
+
+export {
+    PlannerAgent,
+    ReasonerAgent,
+    REASONER_PANEL_MS,
+    BackendAgent,
+    FrontendAgent,
+    TestAgent,
+    ResearchAgent,
+    DefaultAgents,
+    PLANNER_PROTOCOL,
+    WORKER_PROTOCOL,
+    TEAM_PROTOCOL,
+    PRODUCTION_BAR,
+} from "./agents/index.js";
 
 export { GetCurrentTimeTool, DelayTool, ReadImageTool, UtilTools } from "./tools/utils/index.js";
 
@@ -121,6 +143,5 @@ export { PresentSkill } from "./skills/present.js";
 export { QuestionAnswerSkill } from "./skills/question-answer.js";
 export { ReactFrontendSkill } from "./skills/react-frontend.js";
 export { ResearchSkill } from "./skills/research.js";
-export { ShoppingSkill } from "./skills/shopping.js";
 export { UiUxDesignSkill } from "./skills/ui-ux-design.js";
 export { WebEndToEndTestSkill } from "./skills/web-end-to-end-test.js";

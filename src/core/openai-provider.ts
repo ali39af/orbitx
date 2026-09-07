@@ -117,6 +117,10 @@ export class OpenAIProvider extends AIProvider {
         this.#userId = options.userId;
     }
 
+    getModel(): string {
+        return this.#model;
+    }
+
     getCapabilities(): ProviderCapabilities {
         return {
             supportsTools: this.#supportsTools,

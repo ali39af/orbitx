@@ -30,7 +30,6 @@ class Skill {
 | `CodeVerificationSkill` | Running the right type checker/build/lint/test suite before handing code back, and telling real bugs apart from sandbox artifacts. |
 | `WebEndToEndTestSkill` | Testing a live web app like a real user would (fill, click, navigate) and verifying via the rendered page, console, and network. |
 | `ResearchSkill` | Answering questions that need real, current information from the live web — cross-checks multiple sources. |
-| `ShoppingSkill` | Purchase-decision help — real current listings, prices, links, and review sentiment instead of recommending from memory. |
 | `PresentSkill` | Deciding how to hand back a job's output as files (individually or zipped) and cleaning build artifacts out first — pairs with `PresentTools`. |
 | `QuestionAnswerSkill` | Pausing to ask the user for missing information, a decision, or confirmation before continuing, instead of guessing — batches every pending question into one call and stops the turn immediately after asking (`QuestionAnswerTool` sets `stopIterationAfterUsingThisTool`). |
 | `QuestionAnswerSkill` | Wraps `QuestionAnswerTool` with instructions for when it's appropriate to stop and ask the human operator a clarifying question. |

@@ -181,6 +181,10 @@ export class AnthropicProvider extends AIProvider {
         this.#disablePromptCaching = options.disablePromptCaching ?? false;
     }
 
+    getModel(): string {
+        return this.#model;
+    }
+
     getCapabilities(): ProviderCapabilities {
         return {
             supportsTools: this.#supportsTools,

@@ -46,5 +46,8 @@ import "./tools/agent/agent-tools.test.js";
 
 import "./core/agent-definition.test.js";
 import "./core/swarm-base.test.js";
+import "./core/stateless-agent.test.js";
+import "./core/ai-ask.test.js";
+import "./core/mcp-auto-execution-policy.test.js";
 
 import "./agents/default-agents.test.js";

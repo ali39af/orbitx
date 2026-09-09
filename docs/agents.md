@@ -1,9 +1,10 @@
 # Agents
 
-## `BaseAgent` vs `SimpleAgent`
+## `BaseAgent` vs `SimpleAgent` vs `StatelessAgent`
 
 - **`BaseAgent`** (`src/core/base-agent.ts`) is the real engine — the run loop, memory compaction, tool dispatch, token accounting. It requires you to bring your own `MCPClient` (and therefore your own `MCPServer`/connection), which is what gives you the choice of in-process, IPC, or WebSocket execution (see [MCP Architecture](./mcp-architecture.md)).
 - **`SimpleAgent`** (`src/templates/simple.ts`) is a thin subclass that wires up an in-process `MCPConnection` + `MCPServer` + `MCPClient` for you from a flat `tools`/`skills` list. Use this unless you specifically need a different transport.
+- **`StatelessAgent`** (`src/core/stateless-agent.ts`) is not a loop at all — one `input` in, one `chat()` call out (see [`StatelessAgent`](#statelessagent) below). Use this for input checking, classification, or validation, where `BaseAgent`'s multi-turn loop and memory compaction are unnecessary overhead.
 - **`AgentDefinition`** (`src/core/agent-definition.ts`) isn't an agent at all — it's a reusable *description* of one kind of agent (persona, skills, tools) with no runtime wiring, which `SwarmBase` instantiates as many plain `BaseAgent`s as it needs. See [Multi-agent](#multi-agent) below.
 
 ## `BaseAgent` constructor
@@ -163,6 +164,81 @@ Every other `type` entry comes from a tool calling `mcp.executeProvider(toolCall
 ## Instructions, skills, and memory in the system prompt
 
 The system prompt is built lazily on first use and cached — a stable prefix between compactions, which matters for provider-side prompt caching. It's assembled from: a fixed "you have tools" preamble, each skill's name/description/instructions (see [Skills](./skills.md)), the current `MEMORY:` block (sourced from `compactMemory`), and your `instruction` string, in that order. Each `compact_memory` call invalidates the cache (see [Memory compaction](#memory-compaction)), so the next turn's system prompt is rebuilt with the fresh `MEMORY:` block instead of the one that was current when the prompt was first built.
+
+## `StatelessAgent`
+
+```ts
+new StatelessAgent({
+  instruction: string;
+  safetyPolicies?: string;   // default: "" — sent as its own leading system message, same convention as BaseAgent
+  aiProvider: AIProvider | AgentProviderEntry[];
+  mcpClient?: MCPClient;     // required only if allowedTools is non-empty — bring your own, same as BaseAgent
+  allowedTools?: MCPTool<any>[];   // default: []
+});
+```
+
+Unlike `BaseAgent`, there is no `run` loop, no `messagesCompact`/`retiredMessages`, no `compact_memory` tool, and no `getCurrentAgentStates()` — an instance holds only its fixed configuration (instruction, provider, allowed tools), never conversation state. Because of that, one instance is meant to be constructed once and reused: `run()` can be called any number of times, including concurrently, and calls never see each other's input or output — each builds its own message array from scratch (or continues one you hand back in — see below).
+
+```ts
+const result = await agent.run(input: string, streamCallback?: StreamCallback, previousMessages?: Message[]): Promise<StatelessAgentResult>;
+// { content: string; toolCalls: DispatchedToolCall[]; usage: MessageUsage[]; messages: Message[] }
+```
+
+`run()` makes exactly **one** `chat()` call — never a second, even when the model requests tool calls:
+
+1. `previousMessages` omitted (the default): the message array is built fresh as `[system(safetyPolicies), system(instruction), user(input)]`. Given instead, `input` is appended as one more `user` message onto it — this is how you continue an exchange without StatelessAgent retaining any state of its own; see `result.messages` below.
+2. That one `chat()` call is made. If the model requested tool calls, every one of them is dispatched right away (via the `MCPClient`/`allowedTools` this agent was built with — same dispatch semantics as `BaseAgent#dispatchTool`: an error from a tool, or a tool name that isn't allowed, comes back as an `Error: ...` result string rather than throwing), and their `role: "tool"` result messages are appended to `messages`. `run()` then returns immediately — there is no automatic follow-up `chat()` call to fold those results into a final answer.
+
+If the model's first turn requests no tools, `run()` still resolves after that one call, with `toolCalls: []`.
+
+### Continuing an exchange: `result.messages` / `previousMessages`
+
+Since `run()` never makes a second `chat()` call on its own, `result.messages` is how you pick up where it left off: it's the complete array built for that call — the two leading system messages, the `user` turn, the resulting `assistant` turn, and any `tool` result messages — in the order the provider needs them replayed. Call `run()` again with it as `previousMessages` (and whatever `input` makes sense next — often just a nudge like `"continue"`, or nothing new to add beyond letting the model see the tool results) to get the model's next turn, e.g. its synthesized answer after seeing what a tool returned. Each such call is still exactly one `chat()` call; a caller that wants BaseAgent-style looping-until-no-more-tool-calls behavior builds that loop itself by chaining `run()` calls this way, rather than getting it for free.
+
+### Token accounting
+
+`result.usage` is exactly one `MessageUsage` entry per `run()` call — there's no running total to query since there's no persisted state between calls; sum `usage` yourself across calls (e.g. across a chain of `previousMessages`-linked calls) if you need a lifetime total.
+
+## `AIASK`
+
+`AIASK` (`src/core/ai-ask.ts`) asks the model for exactly one answer in a validated JSON shape. It's built on `StatelessAgent`, not a replacement for it — internally it registers a single `submit_answer` tool (built from `outputStructure`) on its own private, in-process `MCPClient` (same `MCPConnection` + `MCPServer` wiring `SimpleAgent` uses) and drives a `StatelessAgent` with it. There's nothing to wire up from outside:
+
+```ts
+new AIASK({
+  instruction: string;
+  aiModel: AIProvider | AgentProviderEntry[];
+  outputStructure: { name: string; type: "number" | "string" | "boolean" | "object" | "array"; description: string; required?: boolean }[];
+});
+```
+
+No `mcpClient`, no `allowedTools`, and deliberately no `safetyPolicies` field — for a single narrow structured-answer call, `instruction` *is* the whole system prompt (fold any guardrail text straight into it) rather than a separate cache-stable prefix, which only earns its keep across many turns.
+
+```ts
+const result = await ask.run(input: string): Promise<AIAskResult>;
+// { output: Record<string, any>; valid: boolean; errors?: string[]; attempts: number; usage: MessageUsage[] }
+```
+
+Each field in `outputStructure` becomes one input on the `submit_answer` tool (`required` defaults to `true`). After the model calls it (or fails to), the returned fields are validated against `outputStructure` — every `required` field present, and each field's JS type (`typeof`, with `Array.isArray` for `"array"` and a plain-object check for `"object"`) matching what was declared. Replying in plain text instead of calling the tool at all counts as a failed attempt too.
+
+A failed attempt (validation errors, or no tool call) triggers a retry: `run()` calls the underlying `StatelessAgent` again, up to **3 attempts total**, with the validation errors folded into the next prompt so the model can see exactly what was wrong and self-correct. The first attempt that validates returns immediately with `valid: true` and `errors` unset. If all 3 attempts fail, `run()` returns rather than throwing — `valid: false`, `errors` from the last attempt, `attempts: 3`, and `output` holding whatever fields the last attempt did manage to submit (possibly `{}` if it never called the tool at all).
+
+```ts
+const ask = new AIASK({
+  instruction: "Classify the input as spam or not.",
+  aiModel,
+  outputStructure: [
+    { name: "spam", type: "boolean", description: "true if this is spam" },
+    { name: "reason", type: "string", description: "one-sentence justification" },
+  ],
+});
+
+const { output, valid, attempts } = await ask.run(userMessage);
+if (valid) {
+  // output is { spam: boolean, reason: string }
+}
+```
+
+`result.usage` accumulates every `chat()` call across every attempt (up to 3, one per `StatelessAgent.run()` call), not just the winning one.
 
 ## Multi-agent
 

@@ -4,6 +4,10 @@ export { resolveThinkEffortLevel, clampThinkEffort } from "./core/think-effort.j
 export type { ThinkEffortLevel } from "./core/think-effort.js";
 export { BaseAgent } from "./core/base-agent.js";
 export type { ExtractedSegment, ParsedToolCall } from "./core/base-agent.js";
+export { StatelessAgent } from "./core/stateless-agent.js";
+export type { StatelessAgentProps, StatelessAgentResult, DispatchedToolCall } from "./core/stateless-agent.js";
+export { AIASK } from "./core/ai-ask.js";
+export type { AIAskProps, AIAskResult, AIAskOutputField, AIAskOutputStructure } from "./core/ai-ask.js";
 export { DeepSeekProvider } from "./core/deepseek-provider.js";
 export { OpenAIProvider } from "./core/openai-provider.js";
 export { AnthropicProvider } from "./core/anthropic-provider.js";
@@ -27,6 +31,8 @@ export { MCPFSStorage } from "./core/mcp-fs-storage.js";
 export { MCPOutputFilter, MCPFilter } from "./core/mcp-filter.js";
 export { MCPExecutionPolicy, MCPBypassExecutionPolicy } from "./core/mcp-execution-policy.js";
 export type { MCPToolCallRequest } from "./core/mcp-execution-policy.js";
+export { MCPAutoExecutionPolicy } from "./core/mcp-auto-execution-policy.js";
+export type { MCPAutoExecutionPolicyProps, MCPAutoExecutionPolicyVerdict } from "./core/mcp-auto-execution-policy.js";
 
 
 export { SimpleAgent } from "./templates/simple.js";

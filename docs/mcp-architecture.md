@@ -158,6 +158,48 @@ class AllowlistPolicy extends MCPExecutionPolicy {
 const mcpClient = new MCPClient(envID, connection, storage, rng, undefined, new AllowlistPolicy(["get_current_time"]));
 ```
 
+### `MCPAutoExecutionPolicy` — an AI-judged policy
+
+`MCPAutoExecutionPolicy` (`src/core/mcp-auto-execution-policy.ts`) is a built-in `MCPExecutionPolicy` that asks a model, via [`AIASK`](./agents.md#aiask), whether each call is safe — an alternative to a hand-written allowlist/denylist for cases where "safe" isn't a fixed rule. It's built to keep the expensive part (an actual model call) as rare as possible rather than reviewing every single tool call:
+
+```ts
+new MCPAutoExecutionPolicy({
+  aiModel: AIProvider | AgentProviderEntry[];
+  instruction?: string;   // extra context appended after the built-in default instruction — e.g. what the user actually asked the agent to do
+  onVerdict?: (request: MCPToolCallRequest, verdict: { harmful: boolean; reason: string }) => void;
+  watchedTools?: string[];   // default: ["bash-run", "fs-write-file", "fs-edit-file", "fs-delete", "fs-move"]
+  scopeDir?: string;         // default: process.cwd() at construction time
+});
+```
+
+Three cost-cutting layers, checked in order inside `authorize(request)`:
+
+1. **Not in `watchedTools`?** Authorized immediately — no model call, no verdict recorded at all. Most tools (`get-current-time`, `todo-*`, `fs-read-file`, ...) have nothing dangerous to weigh, so the default watch list is only the destructive/execution tools: `bash-run` and the fs tools that write, edit, delete, or move something. Pass your own `watchedTools` to widen or narrow that set.
+2. **A watched *fs* call whose path(s) all resolve inside `scopeDir`?** Also authorized immediately, no model call — a write/edit/delete confined to the expected working directory doesn't need judgment. Paths are resolved the same way the fs tools themselves resolve them (relative to `process.cwd()`); `fs-move` needs *both* `from` and `to` inside scope to skip the model — one path escaping scope is enough to escalate. `bash-run` has no path field to check here, so it always falls through to the model.
+3. **Otherwise, ask the model** — via `AIASK`, on `{ toolName, inputs }`. `authorize()` denies whenever the verdict comes back `harmful: true`, or whenever `AIASK` itself couldn't reach a valid verdict after its own retries (fails closed, not open).
+
+Whenever a call *does* reach the model, file content is stripped out first — `fs-write-file`/`fs-edit-file`'s `content` field is replaced with `<omitted, N bytes>` before it's ever sent, since the file's contents aren't relevant to judging whether the *call* is safe, and including it would make every write/edit review needlessly expensive. The model judges those calls by path and other inputs alone.
+
+`authorize()`'s boolean return only tells `MCPClient` whether to proceed — it doesn't surface *why* a call was judged (or skipped as) harmful/safe, which callers usually want (to log it, or show the user what got blocked). Three ways to get that — all populated for both a model-reviewed call and one that was authorized locally via the path-scope check, but never for a call outside `watchedTools`, which is never reviewed at all:
+
+- `policy.getVerdict(toolCallId)` — the verdict recorded for one specific call, if it carried a `toolCallId`.
+- `policy.getLastVerdict()` — the most recent verdict of any reviewed call, useful when only one policy instance is ever in flight at a time.
+- `onVerdict` — called synchronously right after every reviewed `authorize()` decision, with both the request and the verdict.
+
+```ts
+const policy = new MCPAutoExecutionPolicy({
+  aiModel,
+  scopeDir: "/home/me/project",   // writes/edits/deletes/moves confined here skip the model entirely
+  onVerdict: (request, verdict) => {
+    if (verdict.harmful) console.warn(`blocked ${request.toolName}: ${verdict.reason}`);
+  },
+});
+
+const mcpClient = new MCPClient(envID, connection, storage, rng, undefined, policy);
+```
+
+Even with those shortcuts, a call that does reach the model costs at least one real call (more if `AIASK`'s own retry loop kicks in — see [`AIASK`](./agents.md#aiask)) — this still trades latency/cost for judgment a fixed rule can't express, just as rarely as the watch list and scope check allow. Reach for a plain `MCPExecutionPolicy` subclass first when a simple allowlist/denylist actually covers the case.
+
 ## Custom `MCP` subclasses
 
 Both `MCPServer` and `MCPClient` extend the abstract `MCP` class — `getStorage()`, `getRNG()`, and `executeProvider(toolCallId, type, input)`. Tool `execute` functions receive the calling `MCP` instance directly, as their 4th argument (after a `toolCallId` — see [Tools](./tools.md#the-mcptool-shape)), so a tool can reach storage/RNG scoped to whichever client dispatched the call.

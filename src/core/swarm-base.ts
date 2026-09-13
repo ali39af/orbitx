@@ -93,6 +93,7 @@ export class SwarmBase implements SwarmController {
     #agentTools?: AgentToolsHandle;
 
     #subscribers = new Set<SwarmStreamCallback>();
+    #streamQueue: Promise<unknown> = Promise.resolve();
 
     #inFlight = new Set<Promise<unknown>>();
 
@@ -348,12 +349,16 @@ export class SwarmBase implements SwarmController {
     };
 
     #streamFor(record: SwarmAgentRecord): StreamCallback {
-        return async (chunk) => {
+        return (chunk) => {
             if (this.#subscribers.size === 0) return;
             const tagged: SwarmStreamChunk = { ...chunk, agentId: record.id };
-            for (const subscriber of [...this.#subscribers]) {
-                await subscriber(tagged);
-            }
+            const next = this.#streamQueue.then(async () => {
+                for (const subscriber of [...this.#subscribers]) {
+                    await subscriber(tagged);
+                }
+            });
+            this.#streamQueue = next.catch(() => {});
+            return next;
         };
     }
 

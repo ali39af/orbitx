@@ -6,8 +6,7 @@ import { withRetry } from "./retry.js";
 import { resolveThinkEffortLevel, type ThinkEffortLevel } from "./think-effort.js";
 
 const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-    "deepseek-v4-flash": 1_000_000,
-    "deepseek-v4-flash-vision-exp": 1_000_000,
+    "deepseek-flash": 1_000_000,
     "deepseek-v4-pro": 1_000_000,
 };
 const DEFAULT_CONTEXT_WINDOW = 1_000_000;
@@ -19,7 +18,7 @@ const MAX_OUTPUT_TOKENS = 384_000;
 // four levels (OpenAI-compatible param, not in the `openai` SDK's types).
 const DEEPSEEK_THINK_LEVELS: readonly ThinkEffortLevel[] = ["none", "low", "high", "max"];
 
-const IMAGE_MODELS = new Set(["deepseek-v4-flash-vision-exp"]);
+const IMAGE_MODELS = new Set(["deepseek-flash"]);
 
 function toOpenAIMessages(messages: Message[]): any[] {
     return messages.map(msg => {

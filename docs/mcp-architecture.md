@@ -47,6 +47,8 @@ This matters when you're using `MCPIPCConnection`/`MCPWSConnection`/`MCPComputer
 ### `MCPConnection` and its variants
 
 - **`MCPConnection`** (base/in-process) — tools run in the same process as the agent. What `SimpleAgent` uses internally; you'd construct one directly only when composing `BaseAgent` by hand (see the README's "Building from the Base Agent" example).
+
+  It extends the library's own dependency-free `EventEmitter` (`src/core/event-emitter.ts`) rather than Node's `events`, so the base class and its in-process loopback also run in browsers. The emitter keeps Node's semantics for what connections use: `on`/`once`/`off`/`emit`/`removeAllListeners`, synchronous calls in registration order, `off()` removing a `once()` listener, and an unhandled `"error"` event throwing. Custom transports for the browser (e.g. one built on the native `WebSocket`) can subclass `MCPConnection` with `overrided = true` the same way the variants below do. `MCPIPCConnection` and `MCPWSConnection` themselves stay Node-only, since they use `net`/`http`/`ws`.
 - **`MCPIPCConnection`** — connects client and server across two processes over a named pipe (Windows) or Unix domain socket (`socketPath`), with `mode: "server" | "client"` on each side:
 
   ```ts

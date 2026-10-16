@@ -1,4 +1,4 @@
-import EventEmitter from "events";
+import EventEmitter from "./event-emitter.js";
 
 /**
  * Base class for all MCP connections.
@@ -16,6 +16,9 @@ import EventEmitter from "events";
  * "write_to_server"/"write_to_client" over the wire, and emit
  * "server_read"/"client_read" locally depending on which role the transport
  * is currently playing.
+ *
+ * Built on the library's own `EventEmitter` (not Node's `events`), so the
+ * base class and the in-process loopback work in browsers too.
  */
 export class MCPConnection extends EventEmitter {
     constructor(overrided: boolean = false) {

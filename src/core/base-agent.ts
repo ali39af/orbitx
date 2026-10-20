@@ -36,15 +36,30 @@ const COMPACT_MEMORY_TOOL_NAME = "compact_memory";
 
 const COMPACT_CONFIRMATION_MESSAGE = "Memory compacted. Continue where you left off, using MEMORY above for context.";
 
+/** The user's latest message is carried across a compaction verbatim up to this many characters; past it, the head and tail are kept. */
+const CARRIED_USER_MESSAGE_CHARS = 6000;
+
 const COMPACT_MEMORY_TOOL: ToolSchema = {
     name: COMPACT_MEMORY_TOOL_NAME,
-    description: "Compact the conversation so far into a persistent memory note and reset the active working context. Nothing is lost — the summary is shown in every future system prompt's MEMORY section. Call this proactively when the conversation has grown long, or whenever asked to free up context.",
+    description: "Compact the conversation so far into a persistent memory note and reset the active working context. The note is shown in every future system prompt's MEMORY section and the user's latest message is carried over verbatim, but everything else in the working context (tool results, file contents, your own replies) is dropped — write the note so you can carry on from it alone. Call this proactively when the conversation has grown long, or whenever asked to free up context.",
     inputs: [
         {
             name: "new_memory",
             type: "string",
-            description: "A compact summary capturing every important fact, decision, and pending task from the conversation so far. Replaces the current MEMORY note.",
+            description: "The note that replaces the current MEMORY, written as a hand-over to yourself: (1) the user's goal and every request they made, with their exact constraints and preferences; (2) what is done so far, with concrete names (files, commands, ids, results); (3) decisions made and why; (4) what is in progress and the exact next steps; (5) open questions and anything the user is waiting for. Refer to files by path instead of copying their contents — list the ones to read again in files_to_reread. Complete about state, brief about prose.",
             required: true,
+        },
+        {
+            name: "language",
+            type: "string",
+            description: "The language the user writes in and you reply in (e.g. \"Persian\", \"English\"). You keep replying in it after the compaction.",
+            required: false,
+        },
+        {
+            name: "files_to_reread",
+            type: "array",
+            description: "Files you need to read again to carry on, as {path: string, reason: string}[] — e.g. the file you were editing, a spec or plan the user gave. Cheaper than copying their contents into new_memory. Omit when none.",
+            required: false,
         },
         {
             name: "continue_iterating",
@@ -56,6 +71,42 @@ const COMPACT_MEMORY_TOOL: ToolSchema = {
     ],
 };
 
+interface RereadFile {
+    path: string;
+    reason?: string;
+}
+
+/** files_to_reread as the model sent it: objects, or bare paths. */
+function rereadFiles(value: unknown): RereadFile[] {
+    const files: RereadFile[] = [];
+    for (const entry of Array.isArray(value) ? value : []) {
+        if (typeof entry === "string") {
+            if (entry.trim()) files.push({ path: entry.trim() });
+            continue;
+        }
+        const path = typeof entry?.path === "string" ? entry.path.trim() : "";
+        const reason = typeof entry?.reason === "string" ? entry.reason.trim() : "";
+        if (path) files.push({ path, ...(reason ? { reason } : {}) });
+    }
+    return files.slice(0, 30);
+}
+
+/** The memory note as stored: the model's note, then the language and the files to read again, so both survive with it (and with a restore from AgentState). */
+function composeMemory(note: string, language: string, files: RereadFile[]): string {
+    const parts = [note.trim()];
+    if (language) parts.push(`Conversation language: ${language} — keep replying to the user in ${language}.`);
+    if (files.length) {
+        parts.push(["Files to read again before continuing (their contents were not kept):", ...files.map((file) => `- ${file.path}${file.reason ? ` — ${file.reason}` : ""}`)].join("\n"));
+    }
+    return parts.join("\n\n");
+}
+
+function clip(text: string, max: number): string {
+    if (text.length <= max) return text;
+    const half = Math.floor((max - 40) / 2);
+    return `${text.slice(0, half)}\n[… ${text.length - 2 * half} characters left out …]\n${text.slice(-half)}`;
+}
+
 export interface BaseAgentProps {
     safetyPolicies?: string;
     instruction: string;
@@ -63,6 +114,8 @@ export interface BaseAgentProps {
     aiProvider: AgentProvidersInput;
     mcpClient: MCPClient;
     skills?: Skill[];
+    /** What a `compact_memory` note must also keep in this application (e.g. "the todo list's state"). Added to the compaction rules in the system prompt. */
+    compactInstructions?: string;
     /** If omitted, derived from the main provider's reported context window (via getCapabilities()) instead of a hardcoded constant, so the memory-compaction trigger point scales with whatever model is actually in use. */
     maxMemorizeToken?: number;
     initData?: {
@@ -83,6 +136,7 @@ export class BaseAgent {
     #maxMemorizeToken: number;
     #safetyPolicies: string = "";
     #instruction: string = "";
+    #compactInstructions: string = "";
 
     #allSkills: Skill[] = [];
     #allowedTools: MCPTool[] = [];
@@ -91,6 +145,9 @@ export class BaseAgent {
     #systemPrompt?: string;
 
     #compactMemory: string = "";
+    /** From the latest `compact_memory` call, for the message the model reads right after it. */
+    #compactLanguage: string = "";
+    #compactFiles: RereadFile[] = [];
 
     /** Retired messages only — whatever a `compact_memory` call has already folded out of #messagesCompact. Disjoint from #messagesCompact, not a superset of it: a message lives in exactly one of the two at any time. The complete history is the concatenation of this and #messagesCompact, not this array alone. */
     #retiredMessages: Message[] = [];
@@ -128,6 +185,7 @@ export class BaseAgent {
             messagesCompact: [],
         },
         skills = [],
+        compactInstructions = "",
         maxMemorizeToken,
         features: {
             executeProviderFromMCPTool = false
@@ -137,6 +195,7 @@ export class BaseAgent {
     }: BaseAgentProps) {
         this.#safetyPolicies = safetyPolicies;
         this.#instruction = instruction;
+        this.#compactInstructions = compactInstructions;
         this.#allowedTools = allowedTools;
         this.#mcpClient = mcpClient;
         this.#compactMemory = initData.compactMemory;
@@ -197,8 +256,17 @@ export class BaseAgent {
     }
 
     async #getAllToolSchemas(): Promise<ToolSchema[]> {
+        const allowed = new Map(this.#allowedTools.map(t => [t.getOptions().name, t.getOptions()]));
         const mcpTools = (await this.#mcpClient.getTools())
-            .filter(t => this.#allowedTools.map(t => t.getOptions().name).includes(t.name));
+            .filter(t => allowed.has(t.name))
+            // A remote tool that publishes no inputs (a bare proxy that only forwards calls) takes the
+            // schema this agent was given for it, so the model still sees its parameters.
+            .map(t => {
+                const own = allowed.get(t.name)!;
+                return (!t.inputs || t.inputs.length === 0) && own.inputs?.length
+                    ? { name: t.name, description: own.description || t.description, inputs: own.inputs }
+                    : t;
+            });
         return [...mcpTools, COMPACT_MEMORY_TOOL];
     }
 
@@ -212,6 +280,9 @@ ${skill.getSkill().instructions}
 
 COMPACT SESSION MEMORY:
 ${this.#compactMemory || "(empty)"}
+
+COMPACTION RULES:
+When you call ${COMPACT_MEMORY_TOOL_NAME}, only your note, the language, the files to read again and the user's latest message survive; every tool result and file content is dropped. Keep the user's requests and constraints, what is done, the decisions, and the exact next steps; name files by path and list the ones you'll need in files_to_reread instead of copying them. After a compaction, read those files first, then carry on with the next step without asking the user to repeat themselves, and keep replying in the user's language.${this.#compactInstructions ? `\n${this.#compactInstructions}` : ""}
 
 INSTRUCTIONS:
 ${this.#instruction}
@@ -236,13 +307,33 @@ ${this.#buildSkillsAndMemoryBlock(skills)}`;
 
     /** Injected as a normal user turn once the running context crosses `#maxMemorizeToken`, so the model calls `compact_memory` itself on its next turn instead of the reset happening as a hidden side-effect. Explicitly tells the model how to set `continue_iterating` on that call: `run()` trusts whatever the model decides here — including `true`, if the model still has unfinished work from before this nudge fired (e.g. mid-way through a multi-step task) — it doesn't force `continue_iterating` to `false` just because this is a response to a nudge rather than the user. */
     #buildForceCompactPrompt(): string {
-        return `You're nearing the safe context limit for this conversation. Before doing anything else, call the "${COMPACT_MEMORY_TOOL_NAME}" tool with a "new_memory" summary capturing every important fact, decision, and pending task so far. This is routine housekeeping, not a new request from the user — set "continue_iterating" to true only if you still have unfinished work left from their last message (e.g. more steps of a task they asked for), false if you'd already given them everything they needed before this nudge fired.`;
+        return `You're nearing the safe context limit for this conversation. Before doing anything else, call the "${COMPACT_MEMORY_TOOL_NAME}" tool with a "new_memory" hand-over note (the user's requests and constraints, what's done, decisions, the exact next steps), the user's "language", and "files_to_reread" for the files you'll need again (paths and why — don't copy their contents). This is routine housekeeping, not a new request from the user — set "continue_iterating" to true only if you still have unfinished work left from their last message (e.g. more steps of a task they asked for), false if you'd already given them everything they needed before this nudge fired.`;
     }
 
     /** Stores the new running summary from a successful `compact_memory` call and invalidates the cached system prompt, so the very next turn's system prompt is rebuilt with it rather than replaying the stale one. Deliberately does not touch `messagesCompact` — see #archiveWorkingContext(), which run() calls separately once the whole turn's tool calls have all been dispatched. */
-    #applyCompactMemory(newMemory: string): void {
-        this.#compactMemory = newMemory;
+    #applyCompactMemory(newMemory: string, language: string, files: RereadFile[]): void {
+        this.#compactMemory = composeMemory(newMemory, language, files);
+        this.#compactLanguage = language;
+        this.#compactFiles = files;
         this.#systemPrompt = undefined;
+    }
+
+    /** The newest message the user wrote (not one this agent injected), carried across a compaction. */
+    #latestUserMessage(): string | undefined {
+        for (let i = this.#messagesCompact.length - 1; i >= 0; i--) {
+            const message = this.#messagesCompact[i]!;
+            if (message.role === "user" && !message.hidden && typeof message.content === "string" && message.content.trim()) return message.content;
+        }
+        return undefined;
+    }
+
+    /** What the model reads right after a compaction: the user's latest message verbatim, the files to read again, and the language to answer in. */
+    #buildCompactConfirmation(latestUserMessage: string | undefined): string {
+        const parts = [COMPACT_CONFIRMATION_MESSAGE];
+        if (latestUserMessage) parts.push(`The user's latest message, verbatim:\n<<<\n${clip(latestUserMessage, CARRIED_USER_MESSAGE_CHARS)}\n>>>`);
+        if (this.#compactFiles.length) parts.push(`Before the next step, read again: ${this.#compactFiles.map((file) => file.path).join(", ")}.`);
+        if (this.#compactLanguage) parts.push(`Reply to the user in ${this.#compactLanguage}.`);
+        return parts.join("\n\n");
     }
 
     #archiveWorkingContext(): void {
@@ -319,7 +410,8 @@ ${this.#buildSkillsAndMemoryBlock(skills)}`;
     async #dispatchTool(id: string, toolName: string, inputs: Record<string, any>): Promise<DispatchedToolResult> {
         if (toolName === COMPACT_MEMORY_TOOL_NAME) {
             if (typeof inputs?.new_memory === "string") {
-                this.#applyCompactMemory(inputs.new_memory);
+                const language = typeof inputs?.language === "string" ? inputs.language.trim().slice(0, 60) : "";
+                this.#applyCompactMemory(inputs.new_memory, language, rereadFiles(inputs?.files_to_reread));
                 const continueAfterCompact = typeof inputs?.continue_iterating === "boolean" ? inputs.continue_iterating : true;
                 return { id, name: toolName, resultText: COMPACT_CONFIRMATION_MESSAGE, compacted: true, continueAfterCompact };
             }
@@ -483,9 +575,10 @@ ${this.#buildSkillsAndMemoryBlock(skills)}`;
             const compactKeepsGoing = compactedThisTurn && compactRequestsContinue;
 
             if (compactedThisTurn) {
+                const latestUserMessage = this.#latestUserMessage();
                 this.#archiveWorkingContext();
-                 if (compactKeepsGoing || calledAnyNonCompactTool) {
-                    const compactedMessage: Message = { role: "user", content: COMPACT_CONFIRMATION_MESSAGE, timestamp: Date.now(), hidden: true };
+                if (compactKeepsGoing || calledAnyNonCompactTool) {
+                    const compactedMessage: Message = { role: "user", content: this.#buildCompactConfirmation(latestUserMessage), timestamp: Date.now(), hidden: true };
                     this.#messagesCompact.push(compactedMessage);
                     await streamCallback?.({ role: "user", content: compactedMessage.content!, done: true, hidden: true });
                 }

@@ -14,69 +14,37 @@ function agentWith(provider: ScriptedProvider, compactInstructions = "") {
 const systemPrompt = (messages: Message[]) => messages.filter((message) => message.role === "system").map((message) => message.content).join("\n");
 
 describe("core/base-agent compaction", () => {
-    test("keeps the language, the files to read again and the user's latest message", async () => {
+    test("compactInstructions go into the system prompt and the compaction nudge", async () => {
         const seen: Message[][] = [];
         const provider = new ScriptedProvider("compact", [
             ({ messages }) => {
                 seen.push(messages);
-                return {
-                    toolCalls: [{
-                        name: "compact_memory",
-                        inputs: {
-                            new_memory: "Building a landing page; hero done, footer next.",
-                            language: "Persian",
-                            files_to_reread: [{ path: "src/App.tsx", reason: "the page being edited" }, "PLAN.md"],
-                            continue_iterating: true,
-                        },
-                    }],
-                };
+                return { toolCalls: [{ name: "compact_memory", inputs: { new_memory: "Landing page: hero done, footer next.", continue_iterating: true } }] };
             },
-            ({ messages }) => {
-                seen.push(messages);
-                return { content: "ادامه می‌دهم." };
-            },
-        ]);
-        const agent = agentWith(provider, "Keep the todo list's state.");
-
-        await agent.run("یک صفحه فرود بساز");
-
-        const after = seen[1]!;
-        const carried = after.filter((message) => message.role !== "system");
-        assert.equal(carried[0]!.role, "user");
-        assert.equal(carried[0]!.hidden, true);
-        assert.match(carried[0]!.content!, /یک صفحه فرود بساز/);
-        assert.match(carried[0]!.content!, /src\/App\.tsx, PLAN\.md/);
-        assert.match(carried[0]!.content!, /Reply to the user in Persian/);
-
-        const prompt = systemPrompt(after);
-        assert.match(prompt, /Building a landing page/);
-        assert.match(prompt, /Conversation language: Persian/);
-        assert.match(prompt, /- src\/App\.tsx — the page being edited/);
-        assert.match(prompt, /Keep the todo list's state\./);
-
-        const state = agent.getCurrentAgentStates();
-        assert.match(state.compactMemory, /Files to read again/);
-        assert.equal(state.messagesCompact.length, 2);
-    });
-
-    test("a note with only new_memory still works and carries the user's message", async () => {
-        const seen: Message[][] = [];
-        const provider = new ScriptedProvider("plain", [
-            () => ({ toolCalls: [{ name: "compact_memory", inputs: { new_memory: "note" } }] }),
             ({ messages }) => {
                 seen.push(messages);
                 return { content: "ok" };
             },
         ]);
-        const agent = agentWith(provider);
+        const agent = agentWith(provider, "Name the files to read again; keep the user's language.");
 
-        await agent.run("hello there");
+        await agent.run("build a landing page");
 
-        const first = seen[0]!.find((message) => message.role === "user")!;
-        assert.match(first.content!, /^Memory compacted\./);
-        assert.match(first.content!, /hello there/);
-        assert.doesNotMatch(first.content!, /Reply to the user in/);
-        assert.equal(agent.getCurrentAgentStates().compactMemory, "note");
+        assert.match(systemPrompt(seen[0]!), /COMPACTION:\nName the files to read again; keep the user's language\./);
+        const after = systemPrompt(seen[1]!);
+        assert.match(after, /Landing page: hero done/);
+        assert.match(after, /COMPACTION:/);
+        assert.equal(agent.getCurrentAgentStates().compactMemory, "Landing page: hero done, footer next.");
+    });
+
+    test("without compactInstructions the prompt has no COMPACTION block", async () => {
+        const seen: Message[][] = [];
+        const provider = new ScriptedProvider("plain", [({ messages }) => {
+            seen.push(messages);
+            return { content: "ok" };
+        }]);
+        await agentWith(provider).run("hello");
+        assert.doesNotMatch(systemPrompt(seen[0]!), /COMPACTION:/);
     });
 
     test("a remote tool that publishes no inputs takes the agent's own schema", async () => {

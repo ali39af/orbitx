@@ -56,6 +56,18 @@ const COMPACT_MEMORY_TOOL: ToolSchema = {
     ],
 };
 
+/** Built-in tool, offered whenever the agent has a non-empty `toolbox` — the model decides itself which toolbox tools to enable, mid-session. Every successful call stays in the history, which is what lets a restored agent re-enable the same tools (see #restoreUsedTools). */
+const USE_TOOL_NAME = "use_tool";
+
+const RESERVED_TOOL_NAMES = new Set([COMPACT_MEMORY_TOOL_NAME, USE_TOOL_NAME]);
+
+/** Pull the requested names out of a `use_tool` call's inputs — a comma-separated string, or an array if a model sends one. */
+function parseUseToolNames(inputs: Record<string, any> | undefined): string[] {
+    const raw = inputs?.names;
+    const list: unknown[] = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(",") : [];
+    return [...new Set(list.filter((n): n is string => typeof n === "string").map(n => n.trim()).filter(Boolean))];
+}
+
 export interface BaseAgentProps {
     safetyPolicies?: string;
     instruction: string;
@@ -63,6 +75,15 @@ export interface BaseAgentProps {
     aiProvider: AgentProvidersInput;
     mcpClient: MCPClient;
     skills?: Skill[];
+    /**
+     * The limit for the built-in `use_tool` tool: tools the model doesn't get up front but may enable
+     * itself when the task needs them (`use_tool` is offered only while some are still disabled). The
+     * model sees each toolbox tool's name and description in `use_tool`'s description and decides on
+     * its own; it can never enable anything outside this list. Like `allowedTools`, these must be
+     * registered by you on the MCPServer or MCPClient where they should run. Enabled tools survive a
+     * restore: `use_tool` calls found in `initData` are replayed when the agent is constructed.
+     */
+    toolbox?: MCPTool[];
     /** How this application wants `compact_memory` notes written and what to do after one (e.g. "name the files to read again; keep the user's language"). Shown as a COMPACTION block in the system prompt. */
     compactInstructions?: string;
     /** If omitted, derived from the main provider's reported context window (via getCapabilities()) instead of a hardcoded constant, so the memory-compaction trigger point scales with whatever model is actually in use. */
@@ -89,6 +110,12 @@ export class BaseAgent {
 
     #allSkills: Skill[] = [];
     #allowedTools: MCPTool[] = [];
+    /** Bumped on every addTools()/removeTools() change, so the run loop re-reads tool schemas on its next turn — including mid-run, when a tool call itself changed the set. */
+    #toolsVersion: number = 0;
+    /** Names the MCPClient published (locally or through a connection) the last time schemas were read — see #isRegistered. */
+    #registeredToolNames: Set<string> = new Set();
+    /** Tools the model can enable with `use_tool` — see the `toolbox` constructor option. */
+    #toolbox: MCPTool[] = [];
 
     /** Built once, lazily, from all skills/tools — never changes after that, so it's identical (and cache-friendly) across every turn and every iteration of the run loop. */
     #systemPrompt?: string;
@@ -131,6 +158,7 @@ export class BaseAgent {
             messagesCompact: [],
         },
         skills = [],
+        toolbox = [],
         compactInstructions = "",
         maxMemorizeToken,
         features: {
@@ -142,12 +170,14 @@ export class BaseAgent {
         this.#safetyPolicies = safetyPolicies;
         this.#instruction = instruction;
         this.#compactInstructions = compactInstructions;
-        this.#allowedTools = allowedTools;
+        this.#allowedTools = [...allowedTools];
         this.#mcpClient = mcpClient;
         this.#compactMemory = initData.compactMemory;
         this.#retiredMessages = this.#repairHistory(initData.retiredMessages);
         this.#messagesCompact = this.#repairHistory(initData.messagesCompact);
         this.#allSkills = skills;
+        this.setToolbox(toolbox);
+        this.#restoreUsedTools();
         this.#executeProviderFromMCPTool = executeProviderFromMCPTool;
 
         this.#providers = resolveAgentProviders(aiProvider);
@@ -202,18 +232,65 @@ export class BaseAgent {
     }
 
     async #getAllToolSchemas(): Promise<ToolSchema[]> {
-        const allowed = new Map(this.#allowedTools.map(t => [t.getOptions().name, t.getOptions()]));
-        const mcpTools = (await this.#mcpClient.getTools())
-            .filter(t => allowed.has(t.name))
-            // A remote tool that publishes no inputs (a bare proxy that only forwards calls) takes the
-            // schema this agent was given for it, so the model still sees its parameters.
-            .map(t => {
-                const own = allowed.get(t.name)!;
-                return (!t.inputs || t.inputs.length === 0) && own.inputs?.length
-                    ? { name: t.name, description: own.description || t.description, inputs: own.inputs }
-                    : t;
-            });
-        return [...mcpTools, COMPACT_MEMORY_TOOL];
+        const published = new Map((await this.#mcpClient.getTools()).map(t => [t.name, t]));
+        this.#registeredToolNames = new Set(published.keys());
+        const mcpTools: ToolSchema[] = this.#allowedTools.map(tool => {
+            const own = tool.getOptions();
+            const remote = published.get(own.name);
+            if (!remote) return { name: own.name, description: own.description, inputs: own.inputs };
+            return (!remote.inputs || remote.inputs.length === 0) && own.inputs?.length
+                ? { name: remote.name, description: own.description || remote.description, inputs: own.inputs }
+                : remote;
+        });
+        const useTool = this.#buildUseToolSchema();
+        return [...mcpTools, ...(useTool ? [useTool] : []), COMPACT_MEMORY_TOOL];
+    }
+
+    /** `use_tool`'s schema, listing the toolbox tools not enabled yet — or undefined when none are left, so the model isn't offered a tool with nothing to do. */
+    #buildUseToolSchema(): ToolSchema | undefined {
+        const allowed = new Set(this.#allowedTools.map(t => t.getOptions().name));
+        const available = this.#toolbox.filter(t => !allowed.has(t.getOptions().name));
+        if (available.length === 0) return undefined;
+        return {
+            name: USE_TOOL_NAME,
+            description: `Enable more tools for this session when the task needs them. Enabled tools become callable from your next turn and stay enabled. Only the tools listed here can be enabled; enable only what the current task needs.\n\nAvailable tools:\n${available.map(t => `- ${t.getOptions().name}: ${t.getOptions().description}`).join("\n")}`,
+            inputs: [
+                {
+                    name: "names",
+                    type: "string",
+                    description: "Name of the tool to enable, or several names separated by commas.",
+                    required: true,
+                },
+            ],
+        };
+    }
+
+    /** Enable toolbox tools by name; reports which were enabled, already enabled, or not in the toolbox. */
+    #enableFromToolbox(names: string[]): { enabled: string[]; alreadyEnabled: string[]; unknown: string[] } {
+        const allowed = new Set(this.#allowedTools.map(t => t.getOptions().name));
+        const enabled: string[] = [], alreadyEnabled: string[] = [], unknown: string[] = [];
+        const toAdd: MCPTool[] = [];
+        for (const name of names) {
+            const tool = this.#toolbox.find(t => t.getOptions().name === name);
+            if (!tool) unknown.push(name);
+            else if (allowed.has(name)) alreadyEnabled.push(name);
+            else { toAdd.push(tool); enabled.push(name); }
+        }
+        if (toAdd.length) this.addTools(toAdd);
+        return { enabled, alreadyEnabled, unknown };
+    }
+
+    #restoreUsedTools(): void {
+        const history = [...this.#retiredMessages, ...this.#messagesCompact];
+        const answered = new Set(history.filter(m => m.role === "tool" && m.toolName === USE_TOOL_NAME && !m.content?.startsWith("Error:")).map(m => m.toolCallId));
+        const names: string[] = [];
+        for (const message of history) {
+            if (message.role !== "assistant") continue;
+            for (const call of message.toolCalls ?? []) {
+                if (call.name === USE_TOOL_NAME && answered.has(call.id)) names.push(...parseUseToolNames(call.inputs));
+            }
+        }
+        if (names.length) this.#enableFromToolbox([...new Set(names)]);
     }
 
     #buildSkillsAndMemoryBlock(skills: Skill[]): string {
@@ -340,8 +417,21 @@ ${this.#buildSkillsAndMemoryBlock(skills)}`;
             return { id, name: toolName, resultText: `Error: ${COMPACT_MEMORY_TOOL_NAME} requires new_memory:string, got ${JSON.stringify(inputs)}` };
         }
 
+        if (toolName === USE_TOOL_NAME && this.#toolbox.length > 0) {
+            const names = parseUseToolNames(inputs);
+            if (names.length === 0) {
+                return { id, name: toolName, resultText: `Error: ${USE_TOOL_NAME} requires names:string (one tool name, or several separated by commas), got ${JSON.stringify(inputs)}` };
+            }
+            const result = this.#enableFromToolbox(names);
+            return { id, name: toolName, resultText: JSON.stringify(result) };
+        }
+
         if (!this.#allowedTools.map(t => t.getOptions().name).includes(toolName)) {
             return { id, name: toolName, resultText: `Error: tool "${toolName}" not found or not allowed.` };
+        }
+
+        if (!(await this.#isRegistered(toolName))) {
+            return { id, name: toolName, resultText: `Error: tool "${toolName}" is not available right now.` };
         }
 
         this.#usageByToolCallId.set(id, []);
@@ -353,6 +443,83 @@ ${this.#buildSkillsAndMemoryBlock(skills)}`;
         } finally {
             this.#usageByToolCallId.delete(id);
         }
+    }
+
+    addTools(tools: MCPTool | MCPTool[]): string[] {
+        const incoming = Array.isArray(tools) ? tools : [tools];
+
+        const byName = new Map<string, MCPTool>();
+        for (const tool of incoming) {
+            const name = tool.getOptions().name;
+            if (!name) throw new Error("BaseAgent.addTools: every tool needs a name.");
+            if (RESERVED_TOOL_NAMES.has(name)) {
+                throw new Error(`BaseAgent.addTools: "${name}" is a reserved built-in tool name.`);
+            }
+            byName.set(name, tool);
+        }
+        if (byName.size === 0) return [];
+
+        for (const [name, tool] of byName) {
+            const existing = this.#allowedTools.find(t => t.getOptions().name === name);
+            if (existing === tool) continue;
+            if (existing) this.#dropTool(existing);
+
+            this.#allowedTools.push(tool);
+        }
+
+        this.#toolsVersion++;
+        return [...byName.keys()];
+    }
+
+    removeTools(tools: MCPTool | string | (MCPTool | string)[]): string[] {
+        const targets = Array.isArray(tools) ? tools : [tools];
+        const removed: string[] = [];
+        for (const target of targets) {
+            const tool = typeof target === "string"
+                ? this.#allowedTools.find(t => t.getOptions().name === target)
+                : this.#allowedTools.find(t => t === target);
+            if (!tool) continue;
+            this.#dropTool(tool);
+            removed.push(tool.getOptions().name);
+        }
+        if (removed.length) this.#toolsVersion++;
+        return removed;
+    }
+
+    setTools(tools: MCPTool[]): string[] {
+        const keep = new Set(tools);
+        this.removeTools(this.#allowedTools.filter(t => !keep.has(t)));
+        return this.addTools(tools);
+    }
+
+    getAllowedTools(): MCPTool[] {
+        return [...this.#allowedTools];
+    }
+
+    setToolbox(tools: MCPTool[]): void {
+        for (const tool of tools) {
+            const name = tool.getOptions().name;
+            if (RESERVED_TOOL_NAMES.has(name)) {
+                throw new Error(`BaseAgent.setToolbox: "${name}" is a reserved built-in tool name.`);
+            }
+        }
+        this.#toolbox = [...tools];
+        this.#toolsVersion++;
+    }
+
+    /** The toolbox — see setToolbox(). A copy. */
+    getToolbox(): MCPTool[] {
+        return [...this.#toolbox];
+    }
+
+    #dropTool(tool: MCPTool): void {
+        this.#allowedTools = this.#allowedTools.filter(t => t !== tool);
+    }
+
+    async #isRegistered(toolName: string): Promise<boolean> {
+        if (this.#registeredToolNames.has(toolName) || this.#mcpClient.hasLocalTool(toolName)) return true;
+        this.#registeredToolNames = new Set((await this.#mcpClient.getTools()).map(t => t.name));
+        return this.#registeredToolNames.has(toolName);
     }
 
     async stop(): Promise<void> {
@@ -417,7 +584,8 @@ ${this.#buildSkillsAndMemoryBlock(skills)}`;
             );
         }
 
-        const allTools = await this.#getAllToolSchemas();
+        let allTools: ToolSchema[] = [];
+        let toolsVersionSeen = -1;
 
         let keepGoing = true;
         let firstIteration = true;
@@ -426,6 +594,12 @@ ${this.#buildSkillsAndMemoryBlock(skills)}`;
             if (this.#stopSignal) {
                 this.#stopSignal = false;
                 break;
+            }
+
+            // Re-read schemas whenever addTools()/removeTools() changed the set — also between turns of this same run.
+            if (toolsVersionSeen !== this.#toolsVersion) {
+                toolsVersionSeen = this.#toolsVersion;
+                allTools = await this.#getAllToolSchemas();
             }
 
             const systemPrompt = this.#getOrBuildSystemPrompt();

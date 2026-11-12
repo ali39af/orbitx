@@ -167,6 +167,11 @@ export class MCPClient extends MCP {
         tool.setMCP(this);
         this.#tools.push(tool);
     }
+
+    /** Whether a tool with this name is registered locally on this client (not on a connection's server). */
+    hasLocalTool(name: string): boolean {
+        return this.#tools.some(t => t.getOptions().name === name);
+    }
 }
 
 export default MCPClient;

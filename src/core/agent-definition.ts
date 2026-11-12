@@ -28,6 +28,8 @@ export interface AgentOverrides {
         executeProviderFromMCPTool?: boolean;
     };
     extraTools?: MCPTool[];
+    /** Added to the definition's toolbox (tools the model may enable itself with `use_tool`). */
+    extraToolbox?: MCPTool[];
 }
 
 export interface AgentDefinitionProps {
@@ -37,6 +39,8 @@ export interface AgentDefinitionProps {
     instruction: string;
     safetyPolicies?: string;
     tools: MCPTool[];
+    /** Tools the model may enable itself with the built-in `use_tool` — see BaseAgentProps.toolbox. */
+    toolbox?: MCPTool[];
     skills?: Skill[];
     aiProvider?: AgentProvidersInput;
     maxMemorizeToken?: number;
@@ -52,7 +56,7 @@ export class AgentDefinition {
         if (!def.type) {
             throw new Error("AgentDefinition: `type` is required — it's the name a hiring agent uses to hire this kind of agent.");
         }
-        this.#def = { ...def, tools: [...def.tools], skills: def.skills ? [...def.skills] : [] };
+        this.#def = { ...def, tools: [...def.tools], toolbox: def.toolbox ? [...def.toolbox] : [], skills: def.skills ? [...def.skills] : [] };
     }
 
     getDefinition(): AgentDefinitionProps {
@@ -71,6 +75,11 @@ export class AgentDefinition {
             if (!tools.includes(tool)) tools.push(tool);
         }
 
+        const toolbox = [...(this.#def.toolbox ?? [])];
+        for (const tool of overrides.extraToolbox ?? []) {
+            if (!toolbox.includes(tool)) toolbox.push(tool);
+        }
+
         return new AgentDefinition({
             ...this.#def,
             instruction: applyTextOverride(this.#def.instruction, overrides.instruction),
@@ -79,7 +88,13 @@ export class AgentDefinition {
             maxMemorizeToken: overrides.maxMemorizeToken ?? this.#def.maxMemorizeToken,
             features: overrides.features ?? this.#def.features,
             tools,
+            toolbox,
         });
+    }
+
+    /** Tools this definition's agents may enable themselves with `use_tool`. */
+    getToolbox(): MCPTool[] {
+        return [...(this.#def.toolbox ?? [])];
     }
 
     getAllTools(): MCPTool[] {
@@ -102,6 +117,7 @@ export class AgentDefinition {
             safetyPolicies: this.#def.safetyPolicies ?? "",
             allowedTools: this.getAllTools(),
             skills: this.#def.skills ?? [],
+            toolbox: this.#def.toolbox ?? [],
             aiProvider: this.#def.aiProvider ?? runtime.aiProvider,
             mcpClient: runtime.mcpClient,
             maxMemorizeToken: this.#def.maxMemorizeToken ?? runtime.maxMemorizeToken,

@@ -15,7 +15,7 @@ Flat index of every public export from `orbitx` (see `src/index.ts`), grouped by
 
 ## Agents — see [Agents](./agents.md)
 
-- `BaseAgent`
+- `BaseAgent` — runtime tool changes via `addTools()` / `removeTools()` / `setTools()` / `getAllowedTools()`, see [Agents](./agents.md#adding-and-removing-tools-mid-session); the model-driven built-in `use_tool` via the `toolbox` option and `setToolbox()` / `getToolbox()`, see [Agents](./agents.md#use_tool-letting-the-model-pick-its-own-tools)
 - `SimpleAgent`
 - Types: `ExtractedSegment`, `ParsedToolCall`
 

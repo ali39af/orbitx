@@ -17,6 +17,7 @@ new BaseAgent({
   aiProvider: AIProvider | AgentProviderEntry[];   // see Providers doc
   mcpClient: MCPClient;
   skills?: Skill[];
+  toolbox?: MCPTool<any>[];   // tools the model may enable itself with the built-in use_tool (see "use_tool")
   compactInstructions?: string; // how this app wants compact_memory notes written (see Memory compaction)
   maxMemorizeToken?: number;   // default: derived from the main provider's contextWindow * safeUsageRatio
   initData?: {
@@ -40,7 +41,7 @@ It is **not** prepended on an `executeProvider` call (see below) — stuffing a 
 
 A tool's `execute()` can reach a registered `AIProvider` directly via `mcp.executeProvider(toolCallId, type, input)` (see [Tools](./tools.md#mcpexecuteprovider--calling-a-provider-from-inside-a-tool)) — a bigger trust surface than a tool that only returns data to the model, since it lets a tool spend real provider calls (and, per the point above, without a guardrail system prompt ahead of them). It's off by default: `BaseAgent#executeProvider` throws immediately unless `features.executeProviderFromMCPTool` was set `true` on construction. This gates every role uniformly (`image-describer` included) — enable it once you're ready to trust the tools you've allowed with direct provider access. **Inside a swarm this moves up a level:** the swarm answers these calls out of its own provider set, so the flag that counts is `SwarmBaseProps.features` and a per-agent one no longer opens or closes this door — see [Swarm](./swarm.md#providers-a-tool-reaches-for).
 
-`SimpleAgent`'s constructor is the same shape minus `mcpClient`/`allowedTools` (it builds those from `tools`), plus `tools?: MCPTool<any>[]` and `maxMemorizeToken` defaulting to `16000` instead of being derived. `safetyPolicies` and `features` pass straight through to the underlying `BaseAgent`.
+`SimpleAgent`'s constructor is the same shape minus `mcpClient`/`allowedTools` (it builds those from `tools`), plus `tools?: MCPTool<any>[]` (and `toolbox` passes straight through) and `maxMemorizeToken` defaulting to `16000` instead of being derived. `safetyPolicies` and `features` pass straight through to the underlying `BaseAgent`.
 
 Token accounting no longer lives in `initData` as separate counters — every `Message` carries its own `usage` (see [Token accounting](#token-accounting)), so `retiredMessages`/`messagesCompact` alone are enough to resume with full token history intact.
 
@@ -168,7 +169,69 @@ Every other `type` entry comes from a tool calling `mcp.executeProvider(toolCall
 
 ## Tool schemas
 
-Each run sends the model the tools `mcpClient.getTools()` reports, filtered to `allowedTools`, plus `compact_memory`. A remote tool that reports no inputs at all (a bare proxy that only forwards calls, e.g. a desktop app relaying a browser extension's tools) takes the description and inputs of the `allowedTools` entry with the same name, so the model still sees its parameters; a remote tool that publishes its own inputs is sent as published.
+Each model turn sends every tool the agent currently allows (`allowedTools`, changed at runtime by [`addTools()`/`removeTools()`](#adding-and-removing-tools-mid-session) and by the model's own [`use_tool`](#use_tool-letting-the-model-pick-its-own-tools) calls), plus `use_tool` (when the toolbox still has something to enable) and `compact_memory`. The list is fetched once per run and fetched again only when the allowed set changes.
+
+Being *allowed* is what tells the model it has a tool; being *registered* (on an `MCPServer` or on the `MCPClient`) is what lets it run, and that is always the developer's job — the agent never registers anything. So:
+
+- A registered tool is sent with the schema `mcpClient.getTools()` reports for it. A remote tool that reports no inputs at all (a bare proxy that only forwards calls, e.g. a desktop app relaying a browser extension's tools) takes the description and inputs of the allowed `MCPTool` with the same name, so the model still sees its parameters; a remote tool that publishes its own inputs is sent as published.
+- An allowed tool that isn't registered anywhere is still offered, with the allowed `MCPTool`'s own schema. If the model calls it, the call is answered with `Error: tool "<name>" is not available right now.` instead of being sent anywhere (before this check, such a call would wait forever for a server reply). The check uses the names seen when schemas were last read and asks the client again on a miss, so a tool registered in the meantime is still found.
+
+## Adding and removing tools mid-session
+
+The tool set isn't frozen at construction. `BaseAgent` can be given new tools — or have tools taken away — at any point in a session, and the change is offered natively (in the provider's tool list, not as prompt text) from the very next model turn:
+
+```ts
+agent.addTools(tools: MCPTool | MCPTool[]): string[];                       // names now allowed
+agent.removeTools(tools: MCPTool | string | (MCPTool | string)[]): string[];  // names removed
+agent.setTools(tools: MCPTool[]): string[];                                  // replace the whole set
+agent.getAllowedTools(): MCPTool[];                                          // a copy, without the built-ins
+```
+
+- **Between runs:** call `addTools()` and the next `run()` offers it.
+- **Inside a run:** the run loop re-reads tool schemas whenever the set changed, before every model turn — so a tool's own `execute()` can unlock more tools for the rest of the same task (a "load toolset" tool), or a host can add one while the agent is working. Nothing is re-read on turns where the set didn't change, so the tool list stays cache-stable otherwise.
+- **Registration is yours:** these methods only change what the agent allows — they never register a tool anywhere, because *where* it is registered decides where it runs (isolated on a sandboxed `MCPServer`, or in-process on the `MCPClient`), and only you know which is right. Register it with `mcpServer.registerTool()` or `mcpClient.registerTool()` (before or after `addTools()`); an allowed tool that isn't registered is still shown to the model and answers "not available" when called (see [Tool schemas](#tool-schemas)).
+- **Replacing:** adding a tool whose name is already allowed replaces the old instance. `compact_memory` and `use_tool` are reserved and rejected.
+- **Removing:** a removed tool is gone from the next turn; if the model already called it in the current turn, that call is answered with the usual "not found or not allowed" error. Its registration is untouched — if you don't want a tool to exist at all, just don't register it. In a swarm, agents share one `MCPClient`, so `swarm.getAgent(id).addTools(...)` / `removeTools(...)` changes only that agent's allow-list.
+- **Persistence:** tools you add from code with `addTools()` are not part of `AgentState` — after restoring an agent from `initData`, add them again (history that mentions a since-removed tool is replayed as-is). Tools the *model* enabled with [`use_tool`](#use_tool-letting-the-model-pick-its-own-tools) are restored automatically.
+
+```ts
+const shellTools = BashTools();
+shellTools.forEach(tool => sandboxServer.registerTool(tool));   // registered where they should run
+
+let agent!: BaseAgent;
+const loadShellTools = new MCPTool({
+  name: "load_shell_tools",
+  description: "Enable the shell tools when the task needs to run commands.",
+  inputs: [],
+  execute: async () => ({ enabled: agent.addTools(shellTools) }),
+});
+mcpClient.registerTool(loadShellTools);
+agent = new BaseAgent({ instruction, allowedTools: [loadShellTools], aiProvider, mcpClient });
+```
+
+### `use_tool`: letting the model pick its own tools
+
+`addTools()` is the host deciding. With a `toolbox`, the model decides: the agent gets a built-in `use_tool` tool (an orbitx battery, like `compact_memory`), and the model calls it on its own whenever the task needs a tool it doesn't have yet. The only thing you give it is the limit — the `toolbox` list. It can never enable anything outside it.
+
+`use_tool` only tells the model which tools it has; it doesn't make them runnable. Register toolbox tools yourself, exactly like `allowedTools`, on the server or client where each should run. (`SimpleAgent`, and a `SwarmBase` that builds its own MCP, register the toolbox on their own in-process server next to `tools`, since they own that server.)
+
+```ts
+const agent = new SimpleAgent({
+  aiProvider,
+  instruction,
+  tools: [...FsTools()],                 // available from the start
+  toolbox: [...BashTools(), ...BrowserTools()],   // the model may turn these on itself
+});
+```
+
+- `use_tool`'s description lists every toolbox tool not enabled yet (name + description), so the model knows what it can ask for. It takes one input, `names` — one tool name, or several separated by commas.
+- Enabled tools are offered natively from the model's next turn and stay enabled for the session. The result tells the model what happened: `{ enabled, alreadyEnabled, unknown }` (`unknown` = not in the toolbox, nothing enabled).
+- Once every toolbox tool is enabled, `use_tool` is no longer offered. It isn't offered at all when the toolbox is empty.
+- Change the limit at runtime with `agent.setToolbox(tools)` / read it with `agent.getToolbox()`. Tools already enabled stay enabled; use `removeTools()` to take one away.
+- An enabled toolbox tool that isn't registered anywhere answers `not available` when called, like any other allowed tool.
+- In a swarm, put it on the `AgentDefinition` (`toolbox: [...]`), or add to it per type with the `extraToolbox` override.
+
+**Recovery.** Every successful `use_tool` call stays in the history (`messagesCompact`, then `retiredMessages` after a compaction). When an agent is built from `initData`, its constructor walks the whole saved history in order, finds those calls and enables the same tools again (only the names come from the state; the tools themselves are taken from the toolbox you pass) — so a restored session has exactly the tools the model had chosen, `getAllowedTools()` shows them straight away, and the model doesn't call `use_tool` again. Calls whose result was an error are skipped. So are names that are no longer in the toolbox you pass to the restored agent, which is how you narrow the limit across a restore. (A tool removed with `removeTools()` comes back on restore if the model had enabled it with `use_tool`; take it out of the toolbox to keep it off.)
 
 ## Instructions, skills, and memory in the system prompt
 

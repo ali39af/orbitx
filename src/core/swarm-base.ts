@@ -153,7 +153,7 @@ export class SwarmBase implements SwarmController {
             const registered = new Set<MCPTool>();
             const toRegister = [
                 ...tools,
-                ...[...this.#definitions.values()].flatMap(d => d.getAllTools()),
+                ...[...this.#definitions.values()].flatMap(d => [...d.getAllTools(), ...d.getToolbox()]),
                 ...(agentTools?.tools ?? []),
             ];
             for (const tool of toRegister) {

@@ -14,6 +14,7 @@ export class SimpleAgent extends BaseAgent {
         safetyPolicies = "",
         tools = [],
         skills = [],
+        toolbox = [],
         maxMemorizeToken = 16000,
         initData = {
             compactMemory: "",
@@ -27,6 +28,8 @@ export class SimpleAgent extends BaseAgent {
         tools?: MCPTool[];
         aiProvider: AIProvider;
         skills?: Skill[];
+        /** Tools the model may enable itself with the built-in `use_tool` — see BaseAgentProps.toolbox. */
+        toolbox?: MCPTool[];
         maxMemorizeToken?: number;
         initData?: {
             compactMemory: string;
@@ -47,6 +50,10 @@ export class SimpleAgent extends BaseAgent {
             tools.push(tool);
         });
 
+        toolbox.filter(t => !tools.includes(t)).forEach(tool => {
+            mcpServer.registerTool(tool);
+        });
+
         const mcpClient = new MCPClient("DEFAULT_ENV", conn);
         super({
             aiProvider,
@@ -55,6 +62,7 @@ export class SimpleAgent extends BaseAgent {
             mcpClient,
             allowedTools: tools,
             skills,
+            toolbox,
             maxMemorizeToken,
             initData,
             features,

@@ -55,6 +55,7 @@ new AgentDefinition({
   instruction: string;
   safetyPolicies?: string;
   tools: MCPTool[];          // already narrowed out of the app's pool — see selectTools()
+  toolbox?: MCPTool[];       // tools the model may enable itself with use_tool — see Agents doc
   skills?: Skill[];          // their tools are merged into allowedTools automatically
   aiProvider?: AgentProvidersInput;   // optional: pins a provider for this type only
   maxMemorizeToken?: number;
@@ -96,6 +97,7 @@ interface AgentOverrides {
   maxMemorizeToken?: number;
   features?: { executeProviderFromMCPTool?: boolean };
   extraTools?: MCPTool[];    // appended to what the definition picked, deduped
+  extraToolbox?: MCPTool[];  // appended to the definition's toolbox (tools the model may enable itself with use_tool), deduped
 }
 ```
 
@@ -405,7 +407,7 @@ With `initData`, `initData.default` (an agent **id**) names the entrypoint inste
 | `listTypes()` | Every hireable type with its description, ratings, and how many are working. |
 | `getAgentInfo(id)` / `isEntrypoint(id)` | One row of the above, or whether an id is the entrypoint. |
 | `getMainAgent()` / `getMainAgentId()` | The entrypoint `BaseAgent`, or its id. |
-| `getAgent(id)` / `getAgentIds()` | One live agent, or every id. |
+| `getAgent(id)` / `getAgentIds()` | One live agent, or every id. `getAgent(id).addTools(...)` / `removeTools(...)` changes that one agent's tools mid-session — see [Agents](./agents.md#adding-and-removing-tools-mid-session). An `AgentDefinition`'s `toolbox` (or the `extraToolbox` override) lets that type's agents enable tools themselves with `use_tool` — see [Agents](./agents.md#use_tool-letting-the-model-pick-its-own-tools). |
 | `getFailures()` | Background failures — a hired agent that threw mid-task never surfaces through `run()`'s return value. |
 | `getFullTotalToken(type)` / `getFullTotalCost(type)` | Usage summed across every agent, including fired ones — the swarm's whole bill for that provider role. |
 | `getMCPClient()` / `ownsMCP()` | The shared client, and whether the swarm built it. |
